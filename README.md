@@ -1,40 +1,68 @@
-# AArch64 SIMD experiments
+# Hand-written AArch64 NEON dot product
 
-## Hand-written NEON dot-product benchmark
+This project compares a hand-written AArch64 NEON implementation of a signed
+`int32_t` dot product with an equivalent C++ loop compiled at `-O3`. It uses
+two deterministic arrays of 1,000,003 elements, verifies that both paths
+produce the same signed 64-bit scalar result, and times only repeated
+dot-product calls. The assembly is deliberately written in a `.s` file rather
+than with NEON intrinsics: controlling the ABI registers, loads, widening
+operations, accumulator layout, and scalar tail is a design choice of this
+experiment, not a replacement for portable production code.
 
-`neon_dot.s` implements a signed `int32_t` dot product manually using AArch64
-NEON. It loads two 128-bit vectors at a time, uses `smull`/`smull2` to process
-four elements per iteration, accumulates in two 64-bit lanes, and finishes any
-remaining elements with scalar `smaddl`. The benchmark uses 1,000,003 elements
-on purpose, exercising its three-element tail.
+## Files
 
-Build and run it on an AArch64 host, or cross-build and execute it through
-QEMU:
+### `neon_dot.s`
 
-```sh
-make run
-```
+The AArch64 ELF assembly implementation exports
+`int64_t neon_dot_product(const int32_t *, const int32_t *, size_t)`. It takes
+the two array pointers and element count in `x0`–`x2`, loads 16 bytes from each
+array into `q1` and `q2`, and returns the signed 64-bit sum in `x0`. The routine
+uses only caller-saved general-purpose and SIMD registers, so no stack frame or
+callee-saved-register spill is required.
 
-Input initialization happens once before timing. The output verifies the
-assembly result against an equivalent ordinary C++ loop compiled with `-O3`,
-then reports the mean of nine trials (twenty dot products each). Since QEMU
-does not model target timing like real hardware, use native AArch64 for useful
-performance numbers.
+### `dot_benchmark.cpp`
 
-Inspect the linked machine code (including the compiler's `cpp_dot_product`)
-with:
+This is the executable harness and C++ `-O3` baseline. It initializes aligned,
+bounded input arrays deterministically, computes each implementation once for
+the correctness check, then measures nine trials of twenty dot products. Setup,
+correctness reporting, and result consumption are outside each timed interval.
+The baseline is a normal scalar-looking C++ loop; the compiler is free to
+vectorize it for the selected target.
 
-```sh
-make disasm
-less build/dot_benchmark.dis
-```
+### `Makefile`
 
-To break at the assembly routine and inspect the arguments and NEON registers,
-run:
+The Makefile defaults to a Debian-style AArch64 Linux cross toolchain and
+builds `build/neon_dot_benchmark`. `run` executes that Linux binary under QEMU
+user mode; `disasm` writes a source-interleaved disassembly to
+`build/dot_benchmark.dis`; and `gdb` starts QEMU's remote stub and runs the
+provided GDB command file. Compiler, disassembler, QEMU, debugger, and sysroot
+can all be overridden on the command line.
 
-```sh
-make gdb GDB=gdb-multiarch
-```
+### `gdb_neon.gdb`
 
-If your installed `gdb` already supports AArch64, the `GDB=...` override is not
-needed. The commands used are also kept in `gdb_neon.gdb` for interactive use.
+This GDB command file connects to the QEMU remote target, stops at
+`neon_dot_product`, prints the ABI arguments, then stops after the first
+four-element vector iteration. It displays `v0` through `v4` alongside the
+next instructions, allowing the loads, widened products, and accumulator state
+to be checked against the source.
+
+## Technical notes
+
+`smull v3.2d, v1.2s, v2.2s` widens and multiplies the low two 32-bit lanes,
+while `smull2 v4.2d, v1.4s, v2.4s` handles the high two. Both product pairs are
+added to the two 64-bit lanes of `v0`; this avoids 32-bit accumulation overflow.
+At loop exit, the two lanes are reduced into `x3`, and the remaining zero to
+three elements use scalar `smaddl`. The count is deliberately 1,000,003 rather
+than a multiple of four so every benchmark run exercises the tail path.
+
+## Results
+
+Native hardware results only; QEMU user-mode runs are correctness checks, not
+performance data.
+
+| Platform | CPU | C++ -O3 ns/dot | NEON asm ns/dot | Speedup |
+| --- | --- | ---: | ---: | ---: |
+| | | | | |
+
+See [BENCHMARK.md](BENCHMARK.md) for installation, build, execution, debugger,
+and result-submission instructions.
