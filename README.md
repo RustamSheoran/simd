@@ -42,19 +42,19 @@ can all be overridden on the command line.
 
 This GDB command file connects to the QEMU remote target, stops at
 `neon_dot_product`, prints the ABI arguments, then stops after the first
-16-element vector iteration. It displays `v0` through `v4` alongside the
-next instructions, allowing the loads, widened products, and accumulator state
-to be checked against the source.
+32-element vector iteration. It displays `v0` through `v7` alongside the
+next instructions, plus `v16` through `v19`, allowing the loads, widened
+products, and all accumulator state to be checked against the source.
 
 ## Technical notes
 
 `smlal` widens and multiply-accumulates the low two 32-bit lanes, while
-`smlal2` handles the high two. The main loop unrolls to 16 elements and uses
-four independent two-lane 64-bit accumulators (`v0`–`v3`), reducing branch
-overhead and the accumulator dependency chain. At loop exit, those accumulators
-are reduced into `x3`, and the remaining zero to three elements use scalar
-`smaddl`. The count is deliberately 1,000,003 rather than a multiple of four
-so every benchmark run exercises the tail path.
+`smlal2` handles the high two. The main loop unrolls to 32 elements and uses
+eight independent two-lane 64-bit accumulators (`v0`–`v3`, `v16`–`v19`),
+reducing branch overhead and the accumulator dependency chain. At loop exit,
+those accumulators are reduced into `x3`, and the remaining zero to three
+elements use scalar `smaddl`. The count is deliberately 1,000,003 rather than
+a multiple of four so every benchmark run exercises the tail path.
 
 ## Results
 

@@ -9,12 +9,12 @@ continue
 printf "\nAt entry (x0=a, x1=b, x2=count):\n"
 info registers x0 x1 x2 x3 x4 x5
 
-# Stop after the first unrolled 16-element block and its count decrement.
-tbreak *(neon_dot_product + 80)
+# Stop after the first unrolled 32-element block and its count decrement.
+tbreak *(neon_dot_product + 144)
 continue
-printf "\nAfter the first 16-element vector iteration:\n"
+printf "\nAfter the first 32-element vector iteration:\n"
 info registers x0 x1 x2 x3 x4 x5
-info registers v0 v1 v2 v3 v4
+info registers v0 v1 v2 v3 v4 v5 v6 v7 v16 v17 v18 v19
 x/12i $pc
 detach
 quit
