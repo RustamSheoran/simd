@@ -266,6 +266,78 @@ Docker Desktop provides a reproducible Linux environment with QEMU user mode.
    hosts, use the equivalent QEMU-user, AArch64 cross-GCC/G++, binutils, and
    AArch64 Linux sysroot packages, then follow the x86_64 Linux steps above.
 
+## Windows 10/11 via WSL2
+
+The checked-in assembly and Makefile target AArch64 Linux, not PE/COFF or the
+Windows ABI. WSL2 provides the compatible Linux environment. On an x86_64
+Windows PC, this workflow cross-compiles and runs the Linux AArch64 binary
+under QEMU; it is a correctness check, not a native AArch64 benchmark. On a
+Windows-on-ARM PC, WSL should report `aarch64`, and the native AArch64 Linux
+steps can be used instead.
+
+1. In an Administrator PowerShell window, check whether WSL is available:
+
+   ```powershell
+   wsl --status
+   ```
+
+   If WSL is not installed, install Ubuntu and restart when Windows requests
+   it:
+
+   ```powershell
+   wsl --install -d Ubuntu
+   ```
+
+2. Start the Ubuntu distribution, then verify its architecture and required
+   tools:
+
+   ```sh
+   uname -m
+   command -v make qemu-aarch64 aarch64-linux-gnu-g++ aarch64-linux-gnu-objdump gdb-multiarch
+   ```
+
+   On a typical x86_64 Windows host, `uname -m` prints `x86_64`. Missing tools
+   produce no path in the second command.
+
+3. If any tool is missing, install the cross toolchain, QEMU user mode,
+   sysroot, and multi-architecture debugger inside Ubuntu:
+
+   ```sh
+   sudo apt update
+   sudo apt install make qemu-user gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
+     binutils-aarch64-linux-gnu libc6-arm64-cross gdb-multiarch
+   ```
+
+4. Change to the repository. A repository stored in the Windows user profile
+   is normally visible under `/mnt/c`:
+
+   ```sh
+   cd /mnt/c/Users/<WindowsUser>/path/to/simd
+   ```
+
+5. Clean, cross-compile, and execute the AArch64 binary through QEMU:
+
+   ```sh
+   make clean
+   make all
+   make run
+   ```
+
+   The output must contain `dot product: 18046484 (verified equal)`.
+
+6. Generate the AArch64 disassembly and inspect guest register state:
+
+   ```sh
+   make disasm
+   less build/dot_benchmark.dis
+   make gdb GDB=gdb-multiarch
+   ```
+
+The times from `make run` on x86_64 Windows/WSL2 measure QEMU translation on
+that host. Do not place them in the native-results table. For an ARM64 WSL2
+distribution, install `build-essential binutils gdb`, then use the Native
+AArch64 Linux section and execute `./build/neon_dot_benchmark` directly.
+
 ## Android arm64 via Termux (native hardware)
 
 Termux executes the generated AArch64 code directly and requires no root
