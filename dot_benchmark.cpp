@@ -42,12 +42,13 @@ void initialize_inputs() {
 double benchmark_ns_per_dot(DotFn dot) {
     using Clock = std::chrono::steady_clock;
     long double total_ns = 0;
+    DotFn volatile call_target = dot;
     for (int trial = 0; trial < kTrials; ++trial) {
         // The timed interval contains only repeated calls to the dot product.
         const auto start = Clock::now();
         std::int64_t result = 0;
         for (int repeat = 0; repeat < kRepeatsPerTrial; ++repeat) {
-            result = dot(a, b, kCount);
+            result = call_target(a, b, kCount);
         }
         const auto stop = Clock::now();
         benchmark_sink ^= result; // consume the result outside the timed interval
