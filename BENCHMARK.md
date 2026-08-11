@@ -19,62 +19,124 @@ hardware as though they were a single result.
 
 ## Native AArch64 Linux
 
-The following commands target Debian or Ubuntu running directly on AArch64.
-`g++` is already an AArch64 compiler on this host; no cross compiler prefix is
-needed.
+These steps target Debian or Ubuntu running directly on AArch64. The native
+`g++` already emits AArch64 code; a cross-compiler prefix is not required.
 
-```sh
-sudo apt update
-sudo apt install build-essential binutils gdb
-# Optional if the installed gdb lacks AArch64 support:
-sudo apt install gdb-multiarch
+1. Check that this is an AArch64 host and whether the required tools exist:
 
-make clean
-make all CXX=g++ OBJDUMP=objdump
-./build/neon_dot_benchmark
-make disasm CXX=g++ OBJDUMP=objdump
-```
+   ```sh
+   uname -m
+   command -v make g++ objdump gdb
+   ```
 
-`make run` is intentionally not used in this case: that target invokes QEMU.
-For a native debugging session, use GDB directly rather than the QEMU-remote
-script:
+   `uname -m` should print `aarch64` (or `arm64`). Each `command -v` lookup
+   should print a path.
 
-```sh
-gdb -q ./build/neon_dot_benchmark
-(gdb) break neon_dot_product
-(gdb) run
-(gdb) info registers x0 x1 x2 v0 v1 v2 v3 v4
-```
+2. If any tool is missing, install the native toolchain and debugger. Repeating
+   this command is safe when they are already installed:
 
-A successful run has the output shown at the top of this document, including
-`dot product: 18046484 (verified equal)`. These are valid performance numbers
-for the README result table.
+   ```sh
+   sudo apt update
+   sudo apt install build-essential binutils gdb
+   ```
+
+   Install `gdb-multiarch` only if the supplied `gdb` does not support
+   AArch64:
+
+   ```sh
+   sudo apt install gdb-multiarch
+   ```
+
+3. Remove an old build and compile the native executable:
+
+   ```sh
+   make clean
+   make all CXX=g++ OBJDUMP=objdump
+   ```
+
+4. Run it directly on the CPU:
+
+   ```sh
+   ./build/neon_dot_benchmark
+   ```
+
+   The output must contain `dot product: 18046484 (verified equal)`. These are
+   native timings and may be entered in the README results table.
+
+5. Generate and inspect the disassembly:
+
+   ```sh
+   make disasm CXX=g++ OBJDUMP=objdump
+   less build/dot_benchmark.dis
+   ```
+
+6. For native register inspection, start GDB directly. Do not use `make gdb`,
+   which is for QEMU remote debugging:
+
+   ```sh
+   gdb -q ./build/neon_dot_benchmark
+   (gdb) break neon_dot_product
+   (gdb) run
+   (gdb) info registers x0 x1 x2 v0 v1 v2 v3 v4
+   ```
 
 ## x86_64 Linux: cross compile and QEMU user mode
 
-These commands use Debian or Ubuntu packages. `libc6-arm64-cross` supplies the
-Linux AArch64 dynamic-loader and library sysroot used by `qemu-aarch64 -L`.
+These steps use Debian or Ubuntu packages. `libc6-arm64-cross` provides the
+AArch64 Linux dynamic-loader and library sysroot used by `qemu-aarch64 -L`.
 
-```sh
-sudo apt update
-sudo apt install make qemu-user gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
-  binutils-aarch64-linux-gnu libc6-arm64-cross gdb-multiarch
+1. Confirm that the host is x86_64 and check every required program:
 
-make clean
-make all
-make run
-make disasm
-make gdb GDB=gdb-multiarch
-```
+   ```sh
+   uname -m
+   command -v make qemu-aarch64 aarch64-linux-gnu-g++ aarch64-linux-gnu-objdump gdb-multiarch
+   ```
 
-The expected program output is the same correctness line, followed by three
-timing lines. **Do not submit QEMU timings as benchmark results.** QEMU
-user-mode emulation does not reproduce the instruction timing, memory system,
-or scheduling of the target CPU. It is useful here for build validation,
-correctness verification, disassembly, and inspecting guest register state
-only.
+   The first command should normally print `x86_64`. A missing program produces
+   no path in the second command.
 
-If the sysroot is installed somewhere else, pass its directory explicitly:
+2. If any item is missing, install the complete cross-build and debugging set:
+
+   ```sh
+   sudo apt update
+   sudo apt install make qemu-user gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
+     binutils-aarch64-linux-gnu libc6-arm64-cross gdb-multiarch
+   ```
+
+3. Remove old outputs, then cross-compile the AArch64 Linux executable:
+
+   ```sh
+   make clean
+   make all
+   ```
+
+4. Run it through QEMU user mode:
+
+   ```sh
+   make run
+   ```
+
+   It must print `dot product: 18046484 (verified equal)`.
+
+5. Generate the AArch64 disassembly and inspect it:
+
+   ```sh
+   make disasm
+   less build/dot_benchmark.dis
+   ```
+
+6. Inspect guest registers using QEMU's GDB stub:
+
+   ```sh
+   make gdb GDB=gdb-multiarch
+   ```
+
+   The command file stops at entry and after the first vector iteration.
+
+**Do not submit QEMU timings as benchmark results.** QEMU user-mode emulation
+does not reproduce the target CPU's instruction timing, memory system, or
+scheduling. It is useful only for build validation, correctness verification,
+disassembly, and guest register inspection. If the sysroot is elsewhere, run:
 
 ```sh
 make run SYSROOT=/path/to/aarch64-linux-gnu
@@ -82,91 +144,187 @@ make run SYSROOT=/path/to/aarch64-linux-gnu
 
 ## macOS on Apple Silicon (native arm64)
 
-Install a native compiler and LLVM tools with Homebrew:
+1. Verify that the host is Apple Silicon and check for Homebrew:
 
-```sh
-brew install llvm make
-export PATH="$(brew --prefix llvm)/bin:$PATH"
-```
+   ```sh
+   uname -m
+   command -v brew make
+   ```
 
-The checked-in Makefile defaults to `aarch64-linux-gnu-g++` and the assembly
-contains ELF metadata directives, so it is Linux-oriented and cannot be used
-unchanged for Mach-O. Build a temporary Mach-O-compatible copy with the
-ELF-only directives removed, then invoke the native compiler directly:
+   `uname -m` must print `arm64`. If `brew` has no path, install Homebrew:
 
-```sh
-mkdir -p build
-sed -e '/^[[:space:]]*\.type /d' \
-    -e '/^[[:space:]]*\.size /d' \
-    -e '/^[[:space:]]*\.section \.note\.GNU-stack/d' \
-    neon_dot.s > build/neon_dot_macos.s
-clang++ -O3 -g -Wall -Wextra -Wpedantic -std=c++20 -c dot_benchmark.cpp -o build/dot_benchmark.o
-clang -g -c build/neon_dot_macos.s -o build/neon_dot.o
-clang++ -g build/dot_benchmark.o build/neon_dot.o -o build/neon_dot_benchmark
-./build/neon_dot_benchmark
-llvm-objdump --macho --disassemble --demangle build/neon_dot_benchmark > build/dot_benchmark.dis
-```
+   ```sh
+   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+   ```
 
-The expected output includes the same verified scalar result. This is native
-hardware and may be submitted to the results table. Use LLDB for a native
-macOS debugging session; `gdb_neon.gdb` is specifically a QEMU-remote script.
+2. Check for the compiler and disassembler provided by Homebrew:
 
-```sh
-lldb ./build/neon_dot_benchmark
-(lldb) breakpoint set --name neon_dot_product
-(lldb) run
-(lldb) register read x0 x1 x2 v0 v1 v2 v3 v4
-```
+   ```sh
+   brew list --versions llvm
+   ```
+
+   If LLVM is absent, install it:
+
+   ```sh
+   brew install llvm
+   ```
+
+3. Put the Homebrew LLVM tools first in `PATH` for this terminal, then verify
+   that the selected compiler is available:
+
+   ```sh
+   export PATH="$(brew --prefix llvm)/bin:$PATH"
+   command -v clang clang++ llvm-objdump lldb
+   ```
+
+4. The checked-in Makefile targets AArch64 Linux and the assembly contains
+   ELF-only metadata directives. Create a temporary Mach-O-compatible assembly
+   source with those metadata lines removed:
+
+   ```sh
+   rm -rf build
+   mkdir -p build
+   sed -e '/^[[:space:]]*\.type /d' \
+       -e '/^[[:space:]]*\.size /d' \
+       -e '/^[[:space:]]*\.section \.note\.GNU-stack/d' \
+       neon_dot.s > build/neon_dot_macos.s
+   ```
+
+5. Compile and link the native ARM64 executable:
+
+   ```sh
+   clang++ -O3 -g -Wall -Wextra -Wpedantic -std=c++20 -c dot_benchmark.cpp -o build/dot_benchmark.o
+   clang -g -c build/neon_dot_macos.s -o build/neon_dot.o
+   clang++ -g build/dot_benchmark.o build/neon_dot.o -o build/neon_dot_benchmark
+   ```
+
+6. Run it directly and check the result:
+
+   ```sh
+   ./build/neon_dot_benchmark
+   ```
+
+   It must include `dot product: 18046484 (verified equal)`. This is native
+   hardware and may be submitted to the results table.
+
+7. Disassemble the Mach-O executable:
+
+   ```sh
+   llvm-objdump --macho --disassemble --demangle build/neon_dot_benchmark > build/dot_benchmark.dis
+   less build/dot_benchmark.dis
+   ```
+
+8. Use LLDB for native register inspection; `gdb_neon.gdb` is a QEMU-remote
+   command file and is not used here:
+
+   ```sh
+   lldb ./build/neon_dot_benchmark
+   (lldb) breakpoint set --name neon_dot_product
+   (lldb) run
+   (lldb) register read x0 x1 x2 v0 v1 v2 v3 v4
+   ```
 
 ## macOS on Intel, or other x86 hosts
 
-Use a Linux environment with QEMU user mode and the Linux cross toolchain.
-Docker Desktop is one reproducible route on macOS Intel; it produces the same
-correctness-only result as the x86_64 Linux section.
+Docker Desktop provides a reproducible Linux environment with QEMU user mode.
 
-```sh
-brew install --cask docker
-# Start Docker Desktop once, then from the repository root:
-docker run --rm --platform linux/amd64 -v "$PWD":/src -w /src ubuntu:24.04 \
-  bash -lc 'apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y make qemu-user gcc-aarch64-linux-gnu g++-aarch64-linux-gnu binutils-aarch64-linux-gnu libc6-arm64-cross && make clean && make run'
-```
+1. Verify the host architecture and whether Docker is installed:
 
-Successful output again contains `dot product: 18046484 (verified equal)`.
-The timing values are QEMU emulation data and must not be reported as native
-benchmark results. On non-macOS x86 systems, install the equivalent QEMU-user,
-AArch64 cross-GCC/G++, binutils, and AArch64 Linux sysroot packages, then use
-the commands in the x86_64 Linux section.
+   ```sh
+   uname -m
+   command -v docker
+   ```
+
+   Intel Macs normally print `x86_64`. If Docker is missing, install it:
+
+   ```sh
+   brew install --cask docker
+   ```
+
+2. Start Docker Desktop, then verify that its daemon is available:
+
+   ```sh
+   docker version
+   ```
+
+3. From the repository root, start an x86_64 Ubuntu container. It installs the
+   cross toolchain inside the container, builds the project, and runs QEMU:
+
+   ```sh
+   docker run --rm --platform linux/amd64 -v "$PWD":/src -w /src ubuntu:24.04 \
+     bash -lc 'apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y make qemu-user gcc-aarch64-linux-gnu g++-aarch64-linux-gnu binutils-aarch64-linux-gnu libc6-arm64-cross && make clean && make all && make run'
+   ```
+
+   The output must contain `dot product: 18046484 (verified equal)`. It is a
+   QEMU correctness result only, not native performance data. On other x86
+   hosts, use the equivalent QEMU-user, AArch64 cross-GCC/G++, binutils, and
+   AArch64 Linux sysroot packages, then follow the x86_64 Linux steps above.
 
 ## Android arm64 via Termux (native hardware)
 
-Termux executes the generated AArch64 code directly, requires no root access,
-and is a practical way to obtain a real ARM64 result. Install Termux from a
-current supported distribution, then run the following inside Termux:
+Termux executes the generated AArch64 code directly and requires no root
+access. Install Termux from a current supported distribution, then work inside
+the Termux shell.
 
-```sh
-pkg update
-pkg install clang make binutils gdb
+1. Confirm that the phone is 64-bit ARM and check the package manager:
 
-make clean
-make all CXX=clang++ OBJDUMP=llvm-objdump
-./build/neon_dot_benchmark
-make disasm CXX=clang++ OBJDUMP=llvm-objdump
-```
+   ```sh
+   uname -m
+   command -v pkg
+   ```
 
-Do not use `make run` on-device because its command is for a Linux cross binary
-under QEMU. Direct execution above is native and its output should include
-`dot product: 18046484 (verified equal)`; those timings can be submitted as
-native results. Android frequency governors and thermal throttling can strongly
-affect the measurement, so capture the device model and conditions in the PR.
+   The architecture should be `aarch64`. If `pkg` is not found, this is not a
+   Termux shell.
 
-For a direct debug session:
+2. Check the required programs:
 
-```sh
-gdb -q ./build/neon_dot_benchmark
-(gdb) break neon_dot_product
-(gdb) run
-(gdb) info registers x0 x1 x2 v0 v1 v2 v3 v4
-```
+   ```sh
+   command -v clang clang++ make llvm-objdump gdb
+   ```
+
+3. If any program is missing, refresh the Termux package metadata and install
+   the complete set. Repeating the command is safe:
+
+   ```sh
+   pkg update
+   pkg install clang make binutils gdb
+   ```
+
+4. Remove old outputs and compile with Termux's native Clang:
+
+   ```sh
+   make clean
+   make all CXX=clang++ OBJDUMP=llvm-objdump
+   ```
+
+5. Run the binary directly on the Android device:
+
+   ```sh
+   ./build/neon_dot_benchmark
+   ```
+
+   It must include `dot product: 18046484 (verified equal)`. This is a native
+   ARM64 run, so its timings may be submitted as results.
+
+6. Generate the disassembly:
+
+   ```sh
+   make disasm CXX=clang++ OBJDUMP=llvm-objdump
+   less build/dot_benchmark.dis
+   ```
+
+7. Inspect registers with GDB:
+
+   ```sh
+   gdb -q ./build/neon_dot_benchmark
+   (gdb) break neon_dot_product
+   (gdb) run
+   (gdb) info registers x0 x1 x2 v0 v1 v2 v3 v4
+   ```
+
+Do not use `make run` on-device because that target starts QEMU for an AArch64
+Linux cross binary. Android frequency governors and thermal throttling can
+strongly affect timings, so record device conditions in the PR.
 
 ## Contributing benchmark results
 
