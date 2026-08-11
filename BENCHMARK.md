@@ -187,8 +187,14 @@ make run SYSROOT=/path/to/aarch64-linux-gnu
    sed -e '/^[[:space:]]*\.type /d' \
        -e '/^[[:space:]]*\.size /d' \
        -e '/^[[:space:]]*\.section \.note\.GNU-stack/d' \
+       -e 's/^[[:space:]]*\.global neon_dot_product/.global _neon_dot_product/' \
+       -e 's/^neon_dot_product:/_neon_dot_product:/' \
        neon_dot.s > build/neon_dot_macos.s
    ```
+
+   Mach-O prefixes C-callable external symbols with `_`; the last two
+   substitutions make the assembly export `_neon_dot_product`, matching the
+   symbol the macOS C++ compiler requests.
 
 5. Compile and link the native ARM64 executable:
 
@@ -219,7 +225,7 @@ make run SYSROOT=/path/to/aarch64-linux-gnu
 
    ```sh
    lldb ./build/neon_dot_benchmark
-   (lldb) breakpoint set --name neon_dot_product
+   (lldb) breakpoint set --name _neon_dot_product
    (lldb) run
    (lldb) register read x0 x1 x2 v0 v1 v2 v3 v4
    ```
