@@ -9,10 +9,10 @@ continue
 printf "\nAt entry (x0=a, x1=b, x2=count):\n"
 info registers x0 x1 x2 x3 x4 x5
 
-# Stop after ldr/ldr, smull/smull2, both NEON adds, and the decrement.
-tbreak *(neon_dot_product + 40)
+# Stop after the first unrolled 16-element block and its count decrement.
+tbreak *(neon_dot_product + 80)
 continue
-printf "\nAfter the first four-element vector iteration:\n"
+printf "\nAfter the first 16-element vector iteration:\n"
 info registers x0 x1 x2 x3 x4 x5
 info registers v0 v1 v2 v3 v4
 x/12i $pc
