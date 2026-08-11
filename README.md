@@ -67,6 +67,7 @@ performance data.
 | macOS 26 (Apple Silicon) | Apple M1 Pro | 111734.3 | 338653.7 | 0.330x |
 | macOS 26 (Apple Silicon) | Apple M1 Pro | 105768.1 | 134546.5 | 0.786x |
 | macOS 26 (Apple Silicon) | Apple M1 Pro | 109388.7 | 108834.5 | 1.005x |
+| macOS 26 (Apple Silicon) | Apple M1 Pro | 131919.2 | 125140.5 | 1.054x |
 
 See [BENCHMARK.md](BENCHMARK.md) for installation, build, execution, debugger,
 and result-submission instructions.
