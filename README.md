@@ -61,13 +61,13 @@ a multiple of four so every benchmark run exercises the tail path.
 Native hardware results only; QEMU user-mode runs are correctness checks, not
 performance data.
 
-| Platform | CPU | C++ -O3 ns/dot | NEON asm ns/dot | Speedup |
-| --- | --- | ---: | ---: | ---: |
-| macOS 26 (Apple Silicon) | Apple M1 Pro | 6696.1 | 379029.4 | 0.018x |
-| macOS 26 (Apple Silicon) | Apple M1 Pro | 111734.3 | 338653.7 | 0.330x |
-| macOS 26 (Apple Silicon) | Apple M1 Pro | 105768.1 | 134546.5 | 0.786x |
-| macOS 26 (Apple Silicon) | Apple M1 Pro | 109388.7 | 108834.5 | 1.005x |
-| macOS 26 (Apple Silicon) | Apple M1 Pro | 131919.2 | 125140.5 | 1.054x |
+| Platform                 | CPU          | C++ -O3 ns/dot | NEON asm ns/dot | Speedup |
+| ------------------------ | ------------ | -------------: | --------------: | ------: |
+| macOS 26 (Apple Silicon) | Apple M1 Pro |         6696.1 |        379029.4 |  0.018x |
+| macOS 26 (Apple Silicon) | Apple M1 Pro |       111734.3 |        338653.7 |  0.330x |
+| macOS 26 (Apple Silicon) | Apple M1 Pro |       105768.1 |        134546.5 |  0.786x |
+| macOS 26 (Apple Silicon) | Apple M1 Pro |       109388.7 |        108834.5 |  1.005x |
+| macOS 26 (Apple Silicon) | Apple M1 Pro |       131919.2 |        125140.5 |  1.054x |
 
 ### Arch Linux host runs through QEMU user mode
 
@@ -75,19 +75,33 @@ These runs were recorded on the listed host CPU while `qemu-aarch64` executed
 the AArch64 binary. They preserve the observed relative QEMU performance, but
 are not native AArch64 hardware measurements.
 
-| Platform | CPU | C++ -O3 ns/dot | NEON asm ns/dot | Speedup |
-| --- | --- | ---: | ---: | ---: |
-| Arch Linux x86_64 (QEMU user mode) | Intel Core i5-4430 @ 3.00 GHz | 1892028.1 | 1192696.9 | 1.586x |
-| Arch Linux x86_64 (QEMU user mode) | Intel Core i5-4430 @ 3.00 GHz | 1890385.2 | 1189614.9 | 1.589x |
-| Arch Linux x86_64 (QEMU user mode) | Intel Core i5-4430 @ 3.00 GHz | 1894452.1 | 1179819.6 | 1.606x |
-| Arch Linux x86_64 (QEMU user mode) | Intel Core i5-4430 @ 3.00 GHz | 1900968.5 | 1180365.6 | 1.610x |
-| Arch Linux x86_64 (QEMU user mode) | Intel Core i5-4430 @ 3.00 GHz | 1893079.8 | 1180052.0 | 1.604x |
-| Arch Linux x86_64 (QEMU user mode) | Intel Core i5-4430 @ 3.00 GHz | 1892090.1 | 1181202.8 | 1.602x |
-| Arch Linux x86_64 (QEMU user mode) | Intel Core i5-4430 @ 3.00 GHz | 1893200.4 | 1182791.8 | 1.601x |
-| Arch Linux x86_64 (QEMU user mode) | Intel Core i5-4430 @ 3.00 GHz | 1889124.0 | 1178382.1 | 1.603x |
-| Arch Linux x86_64 (QEMU user mode) | Intel Core i5-4430 @ 3.00 GHz | 1904831.6 | 1189383.4 | 1.602x |
-| Arch Linux x86_64 (QEMU user mode) | Intel Core i5-4430 @ 3.00 GHz | 1888460.7 | 1189042.2 | 1.588x |
-| Arch Linux x86_64 (QEMU user mode) | Intel Core i5-4430 @ 3.00 GHz | 1894778.4 | 1181641.7 | 1.604x |
+| Platform                           | CPU                           | C++ -O3 ns/dot | NEON asm ns/dot | Speedup |
+| ---------------------------------- | ----------------------------- | -------------: | --------------: | ------: |
+| Arch Linux x86_64 (QEMU user mode) | Intel Core i5-4430 @ 3.00 GHz |      1892028.1 |       1192696.9 |  1.586x |
+| Arch Linux x86_64 (QEMU user mode) | Intel Core i5-4430 @ 3.00 GHz |      1890385.2 |       1189614.9 |  1.589x |
+| Arch Linux x86_64 (QEMU user mode) | Intel Core i5-4430 @ 3.00 GHz |      1894452.1 |       1179819.6 |  1.606x |
+| Arch Linux x86_64 (QEMU user mode) | Intel Core i5-4430 @ 3.00 GHz |      1900968.5 |       1180365.6 |  1.610x |
+| Arch Linux x86_64 (QEMU user mode) | Intel Core i5-4430 @ 3.00 GHz |      1893079.8 |       1180052.0 |  1.604x |
+| Arch Linux x86_64 (QEMU user mode) | Intel Core i5-4430 @ 3.00 GHz |      1892090.1 |       1181202.8 |  1.602x |
+| Arch Linux x86_64 (QEMU user mode) | Intel Core i5-4430 @ 3.00 GHz |      1893200.4 |       1182791.8 |  1.601x |
+| Arch Linux x86_64 (QEMU user mode) | Intel Core i5-4430 @ 3.00 GHz |      1889124.0 |       1178382.1 |  1.603x |
+| Arch Linux x86_64 (QEMU user mode) | Intel Core i5-4430 @ 3.00 GHz |      1904831.6 |       1189383.4 |  1.602x |
+| Arch Linux x86_64 (QEMU user mode) | Intel Core i5-4430 @ 3.00 GHz |      1888460.7 |       1189042.2 |  1.588x |
+| Arch Linux x86_64 (QEMU user mode) | Intel Core i5-4430 @ 3.00 GHz |      1894778.4 |       1181641.7 |  1.604x |
+
+### Windows 11 / WSL2 host runs through QEMU user mode
+
+These runs were recorded on Windows 11 using WSL2, with `qemu-aarch64`
+executing the AArch64 Linux binary. They preserve the observed relative
+QEMU performance, but are not native AArch64 hardware measurements.
+
+| Platform                           | CPU                      | C++ -O3 ns/dot | NEON asm ns/dot | Speedup |
+| ---------------------------------- | ------------------------ | -------------: | --------------: | ------: |
+| Windows 11 / WSL2 (QEMU user mode) | Ryzen 5 5500U @ 2.10 GHz |      1692338.4 |       1065585.8 |  1.588x |
+| Windows 11 / WSL2 (QEMU user mode) | Ryzen 5 5500U @ 2.10 GHz |      1955312.8 |       1089406.0 |  1.795x |
+| Windows 11 / WSL2 (QEMU user mode) | Ryzen 5 5500U @ 2.10 GHz |      1788839.9 |       1098340.8 |  1.629x |
+| Windows 11 / WSL2 (QEMU user mode) | Ryzen 5 5500U @ 2.10 GHz |      1745037.9 |       1090407.4 |  1.600x |
+| Windows 11 / WSL2 (QEMU user mode) | Ryzen 5 5500U @ 2.10 GHz |      1708918.4 |       1068312.1 |  1.600x |
 
 See [BENCHMARK.md](BENCHMARK.md) for installation, build, execution, debugger,
 and result-submission instructions.
