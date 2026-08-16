@@ -80,19 +80,25 @@ These runs were recorded on the listed host CPU while `qemu-aarch64` executed
 the AArch64 binary. They preserve the observed relative QEMU performance, but
 are not native AArch64 hardware measurements.
 
-| Platform                           | CPU                           | C++ -O3 ns/dot | NEON asm ns/dot | Speedup |
-| ---------------------------------- | ----------------------------- | -------------: | --------------: | ------: |
-| Arch Linux x86_64 (QEMU user mode) | Intel Core i5-4430 @ 3.00 GHz |      1892028.1 |       1192696.9 |  1.586x |
-| Arch Linux x86_64 (QEMU user mode) | Intel Core i5-4430 @ 3.00 GHz |      1890385.2 |       1189614.9 |  1.589x |
-| Arch Linux x86_64 (QEMU user mode) | Intel Core i5-4430 @ 3.00 GHz |      1894452.1 |       1179819.6 |  1.606x |
-| Arch Linux x86_64 (QEMU user mode) | Intel Core i5-4430 @ 3.00 GHz |      1900968.5 |       1180365.6 |  1.610x |
-| Arch Linux x86_64 (QEMU user mode) | Intel Core i5-4430 @ 3.00 GHz |      1893079.8 |       1180052.0 |  1.604x |
-| Arch Linux x86_64 (QEMU user mode) | Intel Core i5-4430 @ 3.00 GHz |      1892090.1 |       1181202.8 |  1.602x |
-| Arch Linux x86_64 (QEMU user mode) | Intel Core i5-4430 @ 3.00 GHz |      1893200.4 |       1182791.8 |  1.601x |
-| Arch Linux x86_64 (QEMU user mode) | Intel Core i5-4430 @ 3.00 GHz |      1889124.0 |       1178382.1 |  1.603x |
-| Arch Linux x86_64 (QEMU user mode) | Intel Core i5-4430 @ 3.00 GHz |      1904831.6 |       1189383.4 |  1.602x |
-| Arch Linux x86_64 (QEMU user mode) | Intel Core i5-4430 @ 3.00 GHz |      1888460.7 |       1189042.2 |  1.588x |
-| Arch Linux x86_64 (QEMU user mode) | Intel Core i5-4430 @ 3.00 GHz |      1894778.4 |       1181641.7 |  1.604x |
+| Platform                           | CPU                              | C++ -O3 ns/dot | NEON asm ns/dot | Speedup |
+| ---------------------------------- | -------------------------------- | -------------: | --------------: | ------: |
+| Arch Linux x86_64 (QEMU user mode) | Intel Core i5-4430 @ 3.00 GHz    |      1892028.1 |       1192696.9 |  1.586x |
+| Arch Linux x86_64 (QEMU user mode) | Intel Core i5-4430 @ 3.00 GHz    |      1890385.2 |       1189614.9 |  1.589x |
+| Arch Linux x86_64 (QEMU user mode) | Intel Core i5-4430 @ 3.00 GHz    |      1894452.1 |       1179819.6 |  1.606x |
+| Arch Linux x86_64 (QEMU user mode) | Intel Core i5-4430 @ 3.00 GHz    |      1900968.5 |       1180365.6 |  1.610x |
+| Arch Linux x86_64 (QEMU user mode) | Intel Core i5-4430 @ 3.00 GHz    |      1893079.8 |       1180052.0 |  1.604x |
+| Arch Linux x86_64 (QEMU user mode) | Intel Core i5-4430 @ 3.00 GHz    |      1892090.1 |       1181202.8 |  1.602x |
+| Arch Linux x86_64 (QEMU user mode) | Intel Core i5-4430 @ 3.00 GHz    |      1893200.4 |       1182791.8 |  1.601x |
+| Arch Linux x86_64 (QEMU user mode) | Intel Core i5-4430 @ 3.00 GHz    |      1889124.0 |       1178382.1 |  1.603x |
+| Arch Linux x86_64 (QEMU user mode) | Intel Core i5-4430 @ 3.00 GHz    |      1904831.6 |       1189383.4 |  1.602x |
+| Arch Linux x86_64 (QEMU user mode) | Intel Core i5-4430 @ 3.00 GHz    |      1888460.7 |       1189042.2 |  1.588x |
+| Arch Linux x86_64 (QEMU user mode) | Intel Core i5-4430 @ 3.00 GHz    |      1894778.4 |       1181641.7 |  1.604x |
+| Arch Linux x86_64 (QEMU user mode) | AMD Ryzen 7 PRO 7735U @ 2.70 GHz |      1599125.1 |       1141852.3 |  1.400x |
+| Arch Linux x86_64 (QEMU user mode) | AMD Ryzen 7 PRO 7735U @ 2.70 GHz |      1636092.9 |       1115006.4 |  1.467x |
+| Arch Linux x86_64 (QEMU user mode) | AMD Ryzen 7 PRO 7735U @ 2.70 GHz |      1578658.2 |       1139426.6 |  1.385x |
+| Arch Linux x86_64 (QEMU user mode) | AMD Ryzen 7 PRO 7735U @ 2.70 GHz |      1567587.4 |       1215504.9 |  1.290x |
+| Arch Linux x86_64 (QEMU user mode) | AMD Ryzen 7 PRO 7735U @ 2.70 GHz |      1587292.8 |       1135548.1 |  1.398x |
+| Arch Linux x86_64 (QEMU user mode) | AMD Ryzen 7 PRO 7735U @ 2.70 GHz |      1618557.2 |       1214445.0 |  1.333x |
 
 ### Windows 11 / WSL2 host runs through QEMU user mode
 
