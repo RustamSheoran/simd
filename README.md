@@ -100,6 +100,23 @@ are not native AArch64 hardware measurements.
 | Arch Linux x86_64 (QEMU user mode) | AMD Ryzen 7 PRO 7735U @ 2.70 GHz |      1587292.8 |       1135548.1 |  1.398x |
 | Arch Linux x86_64 (QEMU user mode) | AMD Ryzen 7 PRO 7735U @ 2.70 GHz |      1618557.2 |       1214445.0 |  1.333x |
 
+### Fedora Linux host runs through QEMU user mode
+
+These runs were recorded on the listed host CPU while `qemu-aarch64` executed
+the AArch64 binary. They preserve the observed relative QEMU performance, but
+are not native AArch64 hardware measurements.
+
+| Platform                                | CPU                              | C++ -O3 ns/dot | NEON asm ns/dot | Speedup |
+| --------------------------------------- | -------------------------------- | -------------: | --------------: | ------: |
+| Fedora Linux x86_64 (QEMU user mode)    | Intel Core i7-12700H @ 2.30 GHz  |       875841.0 |        562462.6 |  1.557x |
+| Fedora Linux x86_64 (QEMU user mode)    | Intel Core i7-12700H @ 2.30 GHz  |       885289.6 |        565777.6 |  1.565x |
+| Fedora Linux x86_64 (QEMU user mode)    | Intel Core i7-12700H @ 2.30 GHz  |       863891.6 |        578997.1 |  1.492x |
+| Fedora Linux x86_64 (QEMU user mode)    | Intel Core i7-12700H @ 2.30 GHz  |       851615.1 |        557833.7 |  1.527x |
+| Fedora Linux x86_64 (QEMU user mode)    | Intel Core i7-12700H @ 2.30 GHz  |       861875.5 |        555027.3 |  1.553x |
+| Fedora Linux x86_64 (QEMU user mode)    | Intel Core i7-12700H @ 2.30 GHz  |       854318.4 |        554607.6 |  1.540x |
+| Fedora Linux x86_64 (QEMU user mode)    | Intel Core i7-12700H @ 2.30 GHz  |       847565.8 |        552108.7 |  1.535x |
+| Fedora Linux x86_64 (QEMU user mode)    | Intel Core i7-12700H @ 2.30 GHz  |       853594.1 |        552231.1 |  1.546x |
+
 ### Windows 11 / WSL2 host runs through QEMU user mode
 
 These runs were recorded on Windows 11 using WSL2, with `qemu-aarch64`
