@@ -120,16 +120,23 @@ are not native AArch64 hardware measurements.
 ### Windows 11 / WSL2 host runs through QEMU user mode
 
 These runs were recorded on Windows 11 using WSL2, with `qemu-aarch64`
-executing the AArch64 Linux binary. They preserve the observed relative
-QEMU performance, but are not native AArch64 hardware measurements.
+executing the AArch64 Linux binary. They preserve the observed relative QEMU
+performance, but are not native AArch64 hardware measurements.
 
-| Platform                           | CPU                      | C++ -O3 ns/dot | NEON asm ns/dot | Speedup |
-| ---------------------------------- | ------------------------ | -------------: | --------------: | ------: |
-| Windows 11 / WSL2 (QEMU user mode) | Ryzen 5 5500U @ 2.10 GHz |      1692338.4 |       1065585.8 |  1.588x |
-| Windows 11 / WSL2 (QEMU user mode) | Ryzen 5 5500U @ 2.10 GHz |      1955312.8 |       1089406.0 |  1.795x |
-| Windows 11 / WSL2 (QEMU user mode) | Ryzen 5 5500U @ 2.10 GHz |      1788839.9 |       1098340.8 |  1.629x |
-| Windows 11 / WSL2 (QEMU user mode) | Ryzen 5 5500U @ 2.10 GHz |      1745037.9 |       1090407.4 |  1.600x |
-| Windows 11 / WSL2 (QEMU user mode) | Ryzen 5 5500U @ 2.10 GHz |      1708918.4 |       1068312.1 |  1.600x |
+| Platform                           | CPU                            | C++ -O3 ns/dot | NEON asm ns/dot | Speedup |
+| ---------------------------------- | -------------------------------| -------------: | --------------: | ------: |
+| Windows 11 / WSL2 (QEMU user mode) | Ryzen 5 5500U @ 2.10 GHz       |      1692338.4 |       1065585.8 |  1.588x |
+| Windows 11 / WSL2 (QEMU user mode) | Ryzen 5 5500U @ 2.10 GHz       |      1955312.8 |       1089406.0 |  1.795x |
+| Windows 11 / WSL2 (QEMU user mode) | Ryzen 5 5500U @ 2.10 GHz       |      1788839.9 |       1098340.8 |  1.629x |
+| Windows 11 / WSL2 (QEMU user mode) | Ryzen 5 5500U @ 2.10 GHz       |      1745037.9 |       1090407.4 |  1.600x |
+| Windows 11 / WSL2 (QEMU user mode) | Ryzen 5 5500U @ 2.10 GHz       |      1708918.4 |       1068312.1 |  1.600x |
+| Windows 11 / WSL2 (QEMU user mode) | Intel Core i3-1215U @ 1.20 GHz |       928322.9 |        603666.0 |  1.538x |
+| Windows 11 / WSL2 (QEMU user mode) | Intel Core i3-1215U @ 1.20 GHz |       968256.7 |        603156.6 |  1.605x |
+| Windows 11 / WSL2 (QEMU user mode) | Intel Core i3-1215U @ 1.20 GHz |       936176.4 |        606340.3 |  1.544x |
+| Windows 11 / WSL2 (QEMU user mode) | Intel Core i3-1215U @ 1.20 GHz |       952319.8 |        640428.2 |  1.487x |
+| Windows 11 / WSL2 (QEMU user mode) | Intel Core i3-1215U @ 1.20 GHz |       951752.2 |        612223.7 |  1.555x |
+| Windows 11 / WSL2 (QEMU user mode) | Intel Core i3-1215U @ 1.20 GHz |       966856.6 |        595240.0 |  1.624x |
+| Windows 11 / WSL2 (QEMU user mode) | Intel Core i3-1215U @ 1.20 GHz |       999398.6 |        594836.0 |  1.680x |
 
 See [BENCHMARK.md](BENCHMARK.md) for installation, build, execution, debugger,
 and result-submission instructions.
