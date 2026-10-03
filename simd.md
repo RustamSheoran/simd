@@ -1,0 +1,737 @@
+# Hand-Written AArch64 NEON Dot Product Engine: From Bare Bones to Silicon
+
+> **Target Project:** `/home/rustam/Projects/simd`  
+> **Architecture:** AArch64 (ARMv8-A / Apple Silicon / AWS Graviton / ARM Cortex-A)  
+> **Core Technologies:** Hand-written Assembly (`.s`), NEON SIMD, C++20, GNU Cross-Toolchain, QEMU User-Mode Emulation, Remote GDB Scripting.
+
+---
+
+## Table of Contents
+1. [Module 0: Ground Zero — What Even is a Dot Product & Why Does It Matter?](#module-0-ground-zero--what-even-is-a-dot-product--why-does-it-matter)
+2. [Module 1: Ground Zero — How Computer Memory & the CPU Actually Work](#module-1-ground-zero--how-computer-memory--the-cpu-actually-work)
+3. [Module 2: Ground Zero — What is Assembly & How the CPU Executes It](#module-2-ground-zero--what-is-assembly--how-the-cpu-executes-it)
+4. [Module 3: SIMD & NEON Microarchitecture Deep Dive (The Hardware View)](#module-3-simd--neon-microarchitecture-deep-dive-the-hardware-view)
+5. [Module 4: Line-by-Line Dissection of `neon_dot.s` (The Assembly Engine)](#module-4-line-by-line-dissection-of-neon_dots-the-assembly-engine)
+6. [Module 5: The C++20 Benchmark Harness & Robust Measurement (`dot_benchmark.cpp`)](#module-5-the-c20-benchmark-harness--robust-measurement-dot_benchmarkcpp)
+7. [Module 6: Cross-Toolchain, QEMU Emulation & GDB Remote Scripting (`Makefile` & `gdb_neon.gdb`)](#module-6-cross-toolchain-qemu-emulation--gdb-remote-scripting-makefile--gdb_neongdb)
+8. [Module 7: Microarchitecture Performance Analysis & The Memory Wall](#module-7-microarchitecture-performance-analysis--the-memory-wall)
+9. [Module 8: The MAANG Systems Interview Defense & Technical FAQ](#module-8-the-maang-systems-interview-defense--technical-faq)
+
+---
+
+# Module 0: Ground Zero — What Even is a Dot Product & Why Does It Matter?
+
+> **Goal:** Understand what a dot product is mathematically, geometrically, and why it is the most executed operation in modern computing.
+
+### 1. What is a Vector?
+Before you can take a dot product, you need vectors. In computer science and physics:
+* A **scalar** is just a single number (e.g. temperature $= 24$, price $= 105$).
+* A **vector** is an ordered list of numbers:
+  $$\vec{A} = [a_0, a_1, a_2, \dots, a_{N-1}]$$
+  * In **3D Graphics**, a vector represents a direction or position in 3D space: $[x, y, z]$.
+  * In **Audio Processing**, a vector represents a buffer of sound amplitudes over time.
+  * In **Quantitative Finance**, a vector represents a list of stock returns or portfolio asset weights.
+  * In **Machine Learning / AI**, a vector represents neural network weights or text embeddings.
+
+---
+
+### 2. The Algebraic Definition (How You Calculate It)
+The **Dot Product** (also called the scalar product or inner product) takes two vectors of equal length, multiplies matching pairs of numbers, and adds all the products together:
+$$\vec{A} \cdot \vec{B} = (a_0 \times b_0) + (a_1 \times b_1) + (a_2 \times b_2) + \dots + (a_{N-1} \times b_{N-1}) = \sum_{i=0}^{N-1} a_i b_i$$
+
+**Concrete Example:**
+$$\vec{A} = [2, 3, -1], \quad \vec{B} = [4, -2, 5]$$
+$$\vec{A} \cdot \vec{B} = (2 \times 4) + (3 \times -2) + (-1 \times 5) = 8 - 6 - 5 = \mathbf{-3}$$
+Notice that you put two vectors in, and **a single scalar number comes out**.
+
+---
+
+### 3. The Geometric Intuition (What It Actually Means)
+Geometrically, the dot product measures **how much two vectors point in the same direction**:
+$$\vec{A} \cdot \vec{B} = \|\vec{A}\| \|\vec{B}\| \cos(\theta)$$
+*(where $\|\vec{A}\|$ is the length of vector $A$, and $\theta$ is the angle between them).*
+
+```
+        Case 1: Parallel                  Case 2: Perpendicular (90°)               Case 3: Opposite
+       (Point same direction)                (Completely independent)             (Point opposite directions)
+
+          B ──────────►                               B ▲                               ◄────────── B
+          A ──────────►                                 │                               A ──────────►
+                                                        └───► A
+      cos(0°) = 1                                  cos(90°) = 0                       cos(180°) = -1
+    Dot Product = MAX (+ positive)               Dot Product = 0                    Dot Product = MIN (- negative)
+```
+* **If $\vec{A} \cdot \vec{B} > 0$:** The vectors agree; they point in generally the same direction.
+* **If $\vec{A} \cdot \vec{B} = 0$:** The vectors are orthogonal (perpendicular). They have zero correlation.
+* **If $\vec{A} \cdot \vec{B} < 0$:** The vectors oppose each other.
+
+---
+
+### 4. Why the Entire Tech Industry Cares About Dot Products
+The dot product is arguably the **#1 most executed mathematical operation on planet Earth**:
+1. **Artificial Intelligence & LLMs (ChatGPT, Claude):**
+   * A neural network layer is: $\text{Output} = \text{Activation}(\mathbf{W} \cdot \mathbf{x} + \mathbf{b})$.
+   * Matrix multiplication is literally **billions of dot products** stacked together. Every token generated by an LLM executes trillions of dot products.
+2. **Quantitative Trading:**
+   * Calculating portfolio expected return: $\mathbf{R}_{\text{portfolio}} = \vec{w} \cdot \vec{r}$ (portfolio asset weights $\cdot$ individual returns).
+   * Calculating risk exposure to factors (Fama-French, Barra risk models).
+3. **3D Game Graphics (Unreal Engine / Unity):**
+   * Lighting calculations (Lambertian diffuse shading): $\text{Brightness} = \text{Surface Normal Vector} \cdot \text{Light Direction Vector}$.
+4. **Signal Processing & Audio:**
+   * Finite Impulse Response (FIR) digital filters (noise cancellation, equalizers) compute the dot product between incoming audio samples and filter coefficients.
+
+### Recommended Reading & Video Lectures
+- 📖 **Read 1:** [BetterExplained - Vector Calculus: Understanding the Dot Product](https://betterexplained.com/articles/vector-calculus-understanding-the-dot-product/) `[Search: "BetterExplained Understanding the Dot Product"]`
+- 📖 **Read 2:** [Khan Academy - The Dot Product (Linear Algebra)](https://www.khanacademy.org/math/linear-algebra/vectors-and-spaces/dot-and-cross-products/v/vector-dot-product-and-vector-length) `[Search: "Khan Academy Vector Dot Product and Vector Length"]`
+- 🎥 **Watch 1:** [Dot products and duality | Chapter 9, Essence of linear algebra](https://www.youtube.com/watch?v=LyGKycYT2v0) `[Search: "3Blue1Brown Dot products and duality Essence of linear algebra"]`
+- 🎥 **Watch 2:** [How CPU Memory & Caches Work - Computerphile](https://www.youtube.com/watch?v=SAk-6gVkio0) `[Search: "How CPU Memory & Caches Work Computerphile"]`
+
+---
+
+# Module 1: Ground Zero — How Computer Memory & the CPU Actually Work
+
+> **Goal:** Understand bytes, memory addresses, cache lines, and the speed-of-light problem that makes CPU memory access slow.
+
+### 1. Memory as a Giant Street of Numbered Mailboxes
+* Computer memory (RAM) is just a massive one-dimensional array of bytes ($8 \text{ bits}$ each).
+* Every single byte has a **Memory Address** (a 64-bit integer, usually written in hexadecimal: `0x1000`, `0x1001`, `0x1002`...).
+* An `int32_t` is 4 bytes. An `int64_t` is 8 bytes.
+* When you declare `std::int32_t a[1000003]`, the operating system reserves $1,000,003 \times 4 \text{ bytes} \approx 4.0 \text{ MB}$ of contiguous memory addresses.
+
+---
+
+### 2. The Speed-of-Light Problem (The Memory Wall)
+A modern CPU runs at **3.0 GHz to 4.5 GHz**. That means the CPU performs **one clock cycle every 0.25 nanoseconds**.
+* In 0.25 nanoseconds, light in vacuum travels **7.5 centimeters** (3 inches). Inside copper traces on a silicon motherboard, electricity travels even slower!
+* Physical RAM (DDR4 / DDR5) is located several inches away from the CPU chip.
+* Therefore, sending an electrical request from the CPU core to physical RAM and waiting for the data to return takes **150 to 250 clock cycles** ($\approx 60\text{--}80$ nanoseconds)!
+
+```
+  Location                       Latency in CPU Cycles     Human Analogy (if 1 cycle = 1 sec)
+ ─────────────────────────────────────────────────────────────────────────────────────────────
+  CPU Registers (x0, v0)         0 to 1 cycle              Right in your hand (1 second)
+  Level 1 Cache (L1)             4 to 5 cycles             On your desk (5 seconds)
+  Level 2 Cache (L2)             12 to 14 cycles           Across the room in a bookshelf (14 seconds)
+  Level 3 Cache (L3 / SLC)       40 to 60 cycles           Downstairs in the basement (1 minute)
+  Main Memory (DRAM)             150 to 250+ cycles        Driving to the grocery store (4 minutes!)
+```
+
+---
+
+### 3. The 64-Byte Cache Line Secret
+Because reaching out to RAM takes so long, the CPU **never** fetches a single byte or a single integer.
+* Whenever the CPU accesses memory, it fetches an entire **64-byte block** called a **Cache Line**.
+* If you read `a[0]` (4 bytes), the CPU automatically loads `a[0]` through `a[15]` ($16 \text{ integers} \times 4 \text{ bytes} = 64 \text{ bytes}$) into the ultra-fast Level 1 Cache!
+* **Spatial Locality:** If your program reads memory linearly from start to finish (`a[0]`, `a[1]`, `a[2]`), 15 out of every 16 accesses will be instant **Cache Hits**!
+
+---
+
+### 4. Why Memory Alignment (`alignas(16)`) is Critical
+In your project’s `dot_benchmark.cpp`, you will see:
+```cpp
+alignas(16) std::int32_t a[kCount];
+alignas(16) std::int32_t b[kCount];
+```
+* **What does `alignas(16)` do?** It forces the compiler to place the start of the array at a memory address that is a clean multiple of 16 bytes (`address % 16 == 0`).
+* **Why do we care?**
+  * NEON SIMD loads 128 bits ($16 \text{ bytes}$) at a time into registers `q4`, `q5`, etc.
+  * If the data is unaligned and happens to cross the boundary between two 64-byte cache lines, the CPU has to make **two separate memory requests** and stitch the bytes together in silicon (**split-line penalty**), cutting memory throughput in half!
+
+### Recommended Reading & Video Lectures
+- 📖 **Read 1:** [Ulrich Drepper - What Every Programmer Should Know About Memory (Part 1)](https://people.freebsd.org/~lstewart/articles/cpumemory.pdf) `[Search: "What Every Programmer Should Know About Memory Ulrich Drepper pdf"]`
+- 📖 **Read 2:** [cppreference - alignas specifier](https://en.cppreference.com/w/cpp/language/alignas) `[Search: "cppreference alignas specifier"]`
+- 🎥 **Watch 1:** [Learn how computers add numbers and build a 4 bit adder circuit - Ben Eater](https://www.youtube.com/watch?v=wvJc9CZcvBc) `[Search: "Learn how computers add numbers and build a 4 bit adder circuit Ben Eater"]`
+- 🎥 **Watch 2:** [Cpu Caches and Why You Care - Scott Meyers - code::dive](https://www.youtube.com/watch?v=WDIkqP4JbkE) `[Search: "Scott Meyers Cpu Caches and Why You Care code dive"]`
+
+---
+
+# Module 2: Ground Zero — What is Assembly & How the CPU Executes It
+
+> **Goal:** Understand machine code vs assembly language, the instruction pipeline, and superscalar out-of-order execution.
+
+### 1. What is Machine Code vs Assembly Language?
+The physical CPU does **not** understand C++, Python, or even text assembly like `smlal`.
+* The CPU only understands raw binary numbers called **Machine Code** (e.g. `0x4e608080`).
+* Because humans cannot read or debug long strings of binary numbers, **Assembly Language** was invented. Assembly is a 1-to-1 human-readable translation of machine instructions using **mnemonics**:
+  * `add` = addition
+  * `ldr` = load register from memory
+  * `b`   = branch (jump to another location)
+  * `ret` = return from function
+* An **Assembler** (like `as` inside GCC) translates the text assembly (`neon_dot.s`) into raw binary machine code (`build/neon_dot.o`).
+
+---
+
+### 2. The CPU Instruction Pipeline
+A CPU core executes instructions in discrete stages along a factory assembly line (the **Pipeline**):
+
+```
+ ┌─────────────┐   ┌─────────────┐   ┌─────────────┐   ┌─────────────┐   ┌─────────────┐
+ │    FETCH    │──►│   DECODE    │──►│ RENAME/SCHED│──►│   EXECUTE   │──►│  WRITEBACK  │
+ │ (Get bytes) │   │ (What op?)  │   │ (Alloc Regs)│   │ (ALU Math)  │   │(Save result)│
+ └─────────────┘   └─────────────┘   └─────────────┘   └─────────────┘   └─────────────┘
+```
+1. **Fetch:** Pulls 32-bit instructions from the L1 Instruction Cache (`L1I`).
+2. **Decode:** Breaks down the instruction: "This is an `smlal` instruction reading `v4` and `v6` and writing to `v0`".
+3. **Register Rename:** Dynamically maps architectural register names to physical silicon registers to eliminate dependencies.
+4. **Execute:** Sends the numbers into the physical Arithmetic Logic Unit (ALU) or Multiply-Accumulate (MAC) circuits.
+5. **Writeback:** Stores the calculated answer back into the destination register.
+
+---
+
+### 3. Superscalar Out-of-Order Execution: Why Multiple ALUs Matter
+Modern high-performance CPUs (like Apple M1/M4, Intel Core, AMD Zen, ARM Cortex-A78) are **Superscalar**:
+* They do not have just one ALU. They have **multiple execution pipelines** running side-by-side (e.g. 4 integer ALUs, 2 load/store units, 4 vector SIMD units).
+* The CPU can execute **4 to 8 instructions per clock cycle**!
+* **The Catch (Data Hazards):** If Instruction 2 needs the result of Instruction 1:
+  ```assembly
+  smlal v0.2d, v4.2s, v6.2s   // Instruction 1: writes to v0
+  smlal v0.2d, v5.2s, v7.2s   // Instruction 2: needs v0! MUST WAIT 3–4 CYCLES!
+  ```
+  Instruction 2 is stalled! It cannot execute until Instruction 1 finishes.
+* **The Solution (Independent Accumulators):**
+  If you use different registers (`v0` and `v1`), the CPU executes **both instructions at the exact same instant**:
+  ```assembly
+  smlal v0.2d, v4.2s, v6.2s   // Pipeline 1: computes into v0
+  smlal v1.2d, v5.2s, v7.2s   // Pipeline 2: computes into v1 IN PARALLEL!
+  ```
+  This is the fundamental reason `neon_dot.s` uses **8 independent accumulators**.
+
+### Recommended Reading & Video Lectures
+- 📖 **Read 1:** [Eli Bendersky - How a compiler converts code to assembly](https://eli.thegreenplace.net/2012/06/03/how-a-compiler-converts-code-to-assembly) `[Search: "eli bendersky how a compiler converts code to assembly"]`
+- 📖 **Read 2:** [Modern Microprocessors: A 90-Minute Guide! (Jason Robert Carey Patterson)](http://www.lighterra.com/papers/modernmicroprocessors/) `[Search: "modern microprocessors a 90 minute guide lighterra"]`
+- 🎥 **Watch 1:** [How to Write Loops and Function Calls in ARM 64-Bit Assembly](https://www.youtube.com/watch?v=H9RlaFqMb9k) `[Search: "How to Write Loops and Function Calls in ARM 64-Bit Assembly Low Level"]`
+- 🎥 **Watch 2:** [CppCon 2017: Chandler Carruth “Going Nowhere Faster”](https://www.youtube.com/watch?v=2EWejmkKlxs) `[Search: "Chandler Carruth Going Nowhere Faster CppCon"]`
+
+---
+
+# Module 3: SIMD & NEON Microarchitecture Deep Dive (The Hardware View)
+
+> **Goal:** Understand what SIMD actually is, what registers look like in physical silicon, and why vector specifiers (`.2s`, `.4s`, `.2d`) exist.
+
+### 1. What is SIMD? (Single Instruction, Multiple Data)
+In standard scalar programming, adding 4 numbers takes 4 separate instructions:
+$$c_0 = a_0 + b_0; \quad c_1 = a_1 + b_1; \quad c_2 = a_2 + b_2; \quad c_3 = a_3 + b_3$$
+In **SIMD**, the CPU uses ultra-wide registers (128 bits wide) and executes **a single instruction** that adds all 4 numbers simultaneously in one clock cycle!
+
+```
+                    Scalar Execution (4 Cycles)
+  Cycle 1: [ a0 ] + [ b0 ] = [ c0 ]
+  Cycle 2: [ a1 ] + [ b1 ] = [ c1 ]
+  Cycle 3: [ a2 ] + [ b2 ] = [ c2 ]
+  Cycle 4: [ a3 ] + [ b3 ] = [ c3 ]
+
+                    SIMD Vector Execution (1 Cycle!)
+  Cycle 1: [ a3 │ a2 │ a1 │ a0 ] + [ b3 │ b2 │ b1 │ b0 ] = [ c3 │ c2 │ c1 │ c0 ]
+```
+
+---
+
+### 2. What is a "Register" in Physical Silicon?
+* A register is **not** RAM. It does not have an address.
+* It is a set of physical electronic circuits called **D Flip-Flops** etched directly onto the silicon chip alongside the execution units.
+* Accessing a register takes **zero clock cycles** (immediate electrical connectivity).
+* In AArch64, you have:
+  * **31 General-Purpose Registers:** `x0` through `x30` (each 64 bits wide). Used for memory addresses, loop counts, and scalar numbers.
+  * **32 SIMD/NEON Registers:** `v0` through `v31` (each 128 bits wide). Used for vector math.
+
+---
+
+### 3. Deciphering Vector Specifiers: Why `.2s`, `.4s`, and `.2d`?
+The vector register `v4` is 128 bits wide. But how should the hardware treat those 128 bits?
+The assembler uses **Vector Arrangement Specifiers**:
+$$\mathbf{v\text{[number]}}\ .\ \mathbf{\text{[lanes]}}\mathbf{\text{[type]}}$$
+
+* **`s`** = Single word (32-bit integer).
+* **`d`** = Doubleword (64-bit integer).
+
+Look at how the exact same 128-bit physical register `v4` is sliced:
+
+```
+  Bit 127                                                             Bit 0
+  ┌───────────────────────────────────────────────────────────────────────┐
+  │                          Physical Register v4                         │
+  └───────────────────────────────────────────────────────────────────────┘
+
+  1. As v4.4s (Four 32-bit signed integers = 128 bits total):
+  ┌───────────────┬───────────────┬───────────────┬───────────────┐
+  │    Lane 3     │    Lane 2     │    Lane 1     │    Lane 0     │
+  │ (Bits 96–127) │ (Bits 64–95)  │ (Bits 32–63)  │  (Bits 0–31)  │
+  └───────────────┴───────────────┴───────────────┴───────────────┘
+  ▲                               ▲
+  │<─────── High Half ───────────>│<──────── Low Half ───────────>│
+  │     (Target of smlal2)        │      (Target of smlal)        │
+
+  2. As v4.2s (Two 32-bit integers = 64 bits total, lower half):
+                                  ┌───────────────┬───────────────┐
+                                  │    Lane 1     │    Lane 0     │
+                                  │ (Bits 32–63)  │  (Bits 0–31)  │
+                                  └───────────────┴───────────────┘
+
+  3. As v0.2d (Two 64-bit widened integers = 128 bits total):
+  ┌───────────────────────────────┬───────────────────────────────┐
+  │            Lane 1             │            Lane 0             │
+  │        (Bits 64–127)          │          (Bits 0–63)          │
+  └───────────────────────────────┴───────────────────────────────┘
+```
+
+---
+
+### 4. Why `smlal` and `smlal2` Pair Together Perfectly
+Look at this code from `neon_dot.s`:
+```assembly
+smlal   v0.2d, v4.2s, v6.2s
+smlal2  v0.2d, v4.4s, v6.4s
+```
+1. **`smlal v0.2d, v4.2s, v6.2s` (Signed Multiply-Accumulate Long):**
+   * Reads **Lane 0** from `v4.2s` (32 bits) and multiplies by **Lane 0** of `v6.2s` (32 bits). Result: 64-bit number.
+   * Reads **Lane 1** from `v4.2s` (32 bits) and multiplies by **Lane 1** of `v6.2s` (32 bits). Result: 64-bit number.
+   * Adds both 64-bit numbers directly to the two 64-bit lanes of **`v0.2d`**!
+   * *Notice:* $2 \times 32\text{-bit inputs} \rightarrow 2 \times 64\text{-bit outputs}$. It doubles in width! That's why it's called **Long** (`smlal`).
+2. **`smlal2 v0.2d, v4.4s, v6.4s` (Signed Multiply-Accumulate Long 2):**
+   * `smlal` only handled Lanes 0 & 1 in the bottom half. What about Lanes 2 & 3 in the top half?
+   * The **`2` suffix** tells the hardware: *"Ignore the bottom half; take Lanes 2 & 3 from the top half of `.4s`, widen-multiply them, and add them to `v0.2d`."*
+3. **The Architectural Brilliance:**
+   * In just **two instructions**, all 4 integers loaded from memory are multiplied, widened to 64 bits, and accumulated into `v0.2d` with **zero data shifting, zero unpacking, and zero register juggling!**
+
+---
+
+### 5. What Happens Physically Inside the Silicon ALU?
+How does the CPU add numbers in parallel without Lane 0 overflowing into Lane 1?
+
+```
+               64-bit Scalar Adder (Standard CPU)
+   Bit 63 <──────────────── Carry propagates continuously ───────────── Bit 0
+   [ + ] <─── [ + ] <─── [ + ] <─── [ + ] <─── [ + ] <─── [ + ] <─── [ + ]
+
+               SIMD Partitioned Adder (NEON Vector ALU)
+        Lane 1 (Bits 32–63)               Lane 0 (Bits 0–31)
+   Bit 63 <── Carry ── Bit 32      X      Bit 31 <── Carry ── Bit 0
+   [ + ] <─── [ + ] <─── [ + ]    CUT!    [ + ] <─── [ + ] <─── [ + ]
+```
+In a vector ALU, the silicon has **carry-break switches**. When configured for `.2s`, the electrical wire carrying the carry bit between Bit 31 and Bit 32 is literally disconnected. The lanes compute in parallel without their math corrupting each other.
+
+### Recommended Reading & Video Lectures
+- 📖 **Read 1:** [Arm Developer - SMLAL and SMLAL2 (vector)](https://developer.arm.com/documentation/dui0801/g/A64-SIMD-Vector-Instructions/SMLAL--SMLAL2--vector-) `[Search: "Arm Developer SMLAL SMLAL2 vector documentation"]`
+- 📖 **Read 2:** [Arm Developer - Neon Programmer's Guide for Armv8-A](https://developer.arm.com/documentation/den0018/latest) `[Search: "Neon Programmer Guide for Armv8-A Arm Developer"]`
+- 🎥 **Watch 1:** [Lecture 14. SIMD (Vector Processors) - Carnegie Mellon - Comp. Arch. 2015 - Onur Mutlu](https://www.youtube.com/watch?v=oGwvMk5re3Y) `[Search: "Lecture 14. SIMD (Vector Processors) Carnegie Mellon Onur Mutlu"]`
+- 🎥 **Watch 2:** [Lecture 15 - Data Flow and SIMD - Carnegie Mellon - Onur Mutlu](https://www.youtube.com/watch?v=f-XL4BNRoBA) `[Search: "Lecture 15 Data Flow and SIMD Carnegie Mellon Onur Mutlu"]`
+
+---
+
+# Module 4: Line-by-Line Dissection of `neon_dot.s` (The Assembly Engine)
+
+> **Goal:** Understand every single line of assembly in your project, why it is there, and how it executes on the silicon.
+
+```assembly
+// Function Signature in C++:
+// extern "C" int64_t neon_dot_product(const int32_t *a, const int32_t *b, size_t count);
+// Input Arguments (AAPCS64):
+//   x0 = pointer to array a
+//   x1 = pointer to array b
+//   x2 = element count (1,000,003)
+// Return Value:
+//   x0 = final 64-bit scalar dot product
+```
+
+### 1. Function Header & Initializing 8 Accumulators
+```assembly
+    .text
+    .align  2
+    .global neon_dot_product
+    .type   neon_dot_product, %function
+neon_dot_product:
+    movi    v0.2d, #0
+    movi    v1.2d, #0
+    movi    v2.2d, #0
+    movi    v3.2d, #0
+    movi    v16.2d, #0
+    movi    v17.2d, #0
+    movi    v18.2d, #0
+    movi    v19.2d, #0
+```
+* `.text`: Directs the assembler to place this code in the executable code segment.
+* `.align 2`: Aligns instructions to $2^2 = 4\text{-byte}$ boundaries (all AArch64 instructions are strictly 32 bits wide).
+* `.global neon_dot_product`: Exports the function name so the C++ linker (`g++`) can find it.
+* `movi v0.2d, #0` through `movi v19.2d, #0`: Zeroes out the 8 independent vector registers. Each register holds two 64-bit zeroed lanes.
+* **Why Caller-Saved Registers?** `v0`–`v3` and `v16`–`v19` are caller-saved (scratch) in AAPCS64. We can use them without saving them to the stack. Zero stack frame needed!
+
+---
+
+### 2. The 32-Element Main Loop (`.Lvector32`)
+```assembly
+.Lvector32:
+    cmp     x2, #32
+    b.lo    .Lvector4
+```
+* `cmp x2, #32`: Compares the remaining count in `x2` with 32.
+* `b.lo .Lvector4`: **Branch if Lower (unsigned < 32)**. If fewer than 32 elements remain, jump to the 4-element fallback loop.
+
+```assembly
+    ldp     q4, q5, [x0], #32
+    ldp     q6, q7, [x1], #32
+    smlal   v0.2d, v4.2s, v6.2s
+    smlal   v1.2d, v5.2s, v7.2s
+    smlal2  v0.2d, v4.4s, v6.4s
+    smlal2  v1.2d, v5.4s, v7.4s
+```
+* `ldp q4, q5, [x0], #32`:
+  * **Load Pair (128-bit each):** Loads 16 bytes into `q4` and 16 bytes into `q5` simultaneously (total 32 bytes = 8 signed 32-bit integers from array `a`).
+  * **Post-Indexed Addressing (`[x0], #32`):** Reads memory at address `x0`, then automatically adds 32 to `x0`! Eliminates a separate pointer addition instruction.
+* `ldp q6, q7, [x1], #32`: Loads 8 integers from array `b` into `q6` and `q7`, advancing `x1` by 32 bytes.
+* `smlal v0.2d, v4.2s, v6.2s`: Multiplies the lower two 32-bit integers of `q4` and `q6`, widens them to 64-bit, and adds to `v0.2d`.
+* `smlal v1.2d, v5.2s, v7.2s`: Multiplies the lower two 32-bit integers of `q5` and `q7`, widens to 64-bit, and adds to `v1.2d`.
+* `smlal2 v0.2d, v4.4s, v6.4s`: Multiplies the upper two 32-bit integers of `q4` and `q6`, widens to 64-bit, and adds to `v0.2d`.
+* `smlal2 v1.2d, v5.4s, v7.4s`: Multiplies the upper two 32-bit integers of `q5` and `q7`, widens to 64-bit, and adds to `v1.2d`.
+
+*(The exact same sequence is repeated for the next 24 elements across accumulators `v2`, `v3`, `v16`, `v17`, `v18`, `v19`):*
+```assembly
+    ldp     q4, q5, [x0], #32
+    ldp     q6, q7, [x1], #32
+    smlal   v2.2d, v4.2s, v6.2s
+    smlal   v3.2d, v5.2s, v7.2s
+    smlal2  v2.2d, v4.4s, v6.4s
+    smlal2  v3.2d, v5.4s, v7.4s
+
+    ldp     q4, q5, [x0], #32
+    ldp     q6, q7, [x1], #32
+    smlal   v16.2d, v4.2s, v6.2s
+    smlal   v17.2d, v5.2s, v7.2s
+    smlal2  v16.2d, v4.4s, v6.4s
+    smlal2  v17.2d, v5.4s, v7.4s
+
+    ldp     q4, q5, [x0], #32
+    ldp     q6, q7, [x1], #32
+    smlal   v18.2d, v4.2s, v6.2s
+    smlal   v19.2d, v5.2s, v7.2s
+    smlal2  v18.2d, v4.4s, v6.4s
+    smlal2  v19.2d, v5.4s, v7.4s
+
+    sub     x2, x2, #32
+    b       .Lvector32
+```
+* `sub x2, x2, #32`: Subtracts 32 from the remaining element count.
+* `b .Lvector32`: Loops back to the start of the vector loop.
+
+---
+
+### 3. Tier 2: 4-Element Fallback (`.Lvector4`)
+```assembly
+.Lvector4:
+    cmp     x2, #4
+    b.lo    .Ltail
+
+    ldr     q4, [x0], #16
+    ldr     q5, [x1], #16
+    smlal   v0.2d, v4.2s, v5.2s
+    smlal2  v0.2d, v4.4s, v5.4s
+    sub     x2, x2, #4
+    b       .Lvector4
+```
+* When fewer than 32 elements remain, we check if at least 4 elements ($16 \text{ bytes}$) remain.
+* `ldr q4, [x0], #16`: Loads 16 bytes into `q4` and increments `x0` by 16.
+* Accumulates into `v0.2d` using `smlal` and `smlal2`.
+
+---
+
+### 4. Tier 3: Horizontal Pairwise Accumulator Reduction (`.Ltail`)
+```assembly
+.Ltail:
+    add     v0.2d, v0.2d, v1.2d
+    add     v2.2d, v2.2d, v3.2d
+    add     v16.2d, v16.2d, v17.2d
+    add     v18.2d, v18.2d, v19.2d
+    add     v0.2d, v0.2d, v2.2d
+    add     v16.2d, v16.2d, v18.2d
+    add     v0.2d, v0.2d, v16.2d
+```
+* We have 8 separate vector accumulators (`v0`–`v3`, `v16`–`v19`). We must sum them together.
+* Instead of adding them one-by-one sequentially, we use a **Binary Tree Reduction**:
+  * Step 1: $v_0 += v_1$, $v_2 += v_3$, $v_{16} += v_{17}$, $v_{18} += v_{19}$ (reduces 8 to 4).
+  * Step 2: $v_0 += v_2$, $v_{16} += v_{18}$ (reduces 4 to 2).
+  * Step 3: $v_0 += v_{16}$ (reduces 2 to 1).
+* Now, `v0.2d` contains the sum of all elements in two 64-bit halves.
+
+```assembly
+    umov    x3, v0.d[0]
+    umov    x4, v0.d[1]
+    add     x3, x3, x4
+```
+* `umov x3, v0.d[0]`: **Unsigned Move** vector lane 0 from SIMD register `v0` to 64-bit general-purpose register `x3`.
+* `umov x4, v0.d[1]`: Unsigned Move vector lane 1 from `v0` to `x4`.
+* `add x3, x3, x4`: Adds the two halves together in `x3`. `x3` now holds the total scalar sum of the entire SIMD path!
+
+---
+
+### 5. Tier 4: The 1-to-3 Element Scalar Tail Loop (`.Ltail_loop`)
+What about the remaining elements? ($1,000,003 \pmod 4 = 3$ elements remaining):
+```assembly
+.Ltail_loop:
+    cbz     x2, .Ldone
+    ldr     w4, [x0], #4
+    ldr     w5, [x1], #4
+    smaddl  x3, w4, w5, x3
+    sub     x2, x2, #1
+    b       .Ltail_loop
+```
+* `cbz x2, .Ldone`: **Compare and Branch if Zero**. If `x2 == 0` (no leftover elements), jump directly to exit.
+* `ldr w4, [x0], #4`: Loads a single 32-bit integer from `a` into general-purpose register `w4` and increments `x0` by 4.
+* `ldr w5, [x1], #4`: Loads a single 32-bit integer from `b` into `w5` and increments `x1` by 4.
+* `smaddl x3, w4, w5, x3`:
+  * **Signed Multiply-Add Long:** Computes $x_3 = (w_4 \times w_5) + x_3$ in **a single hardware cycle**!
+* `sub x2, x2, #1`: Decrements count by 1.
+* `b .Ltail_loop`: Loops until `x2 == 0`.
+
+---
+
+### 6. Return & Security Metadata
+```assembly
+.Ldone:
+    mov     x0, x3
+    ret
+
+    .size neon_dot_product, .-neon_dot_product
+    .section .note.GNU-stack,"",@progbits
+```
+* `mov x0, x3`: In the AAPCS64 calling convention, the return value of a function **must be in register `x0`**. We move our total sum from `x3` to `x0`.
+* `ret`: Returns to the caller in C++.
+* `.size`: Emits ELF symbol size metadata for debugging and profilers.
+* `.section .note.GNU-stack,"",@progbits`: **Crucial security directive**. Marks the stack memory as Non-Executable (NX bit / DEP). Without this, the Linux linker will print a security warning that the stack might be vulnerable to buffer-overflow code injection attacks.
+
+---
+
+# Module 5: The C++20 Benchmark Harness & Robust Measurement (`dot_benchmark.cpp`)
+
+> **Goal:** Understand how to build a microbenchmark that prevents compiler optimizations from faking results.
+
+### Key Implementation Highlights
+
+#### 1. The C++ `-O3` Baseline
+```cpp
+extern "C" __attribute__((noinline)) std::int64_t cpp_dot_product(
+    const std::int32_t* a, const std::int32_t* b, std::size_t count) {
+    std::int64_t sum = 0;
+    for (std::size_t i = 0; i < count; ++i) {
+        sum += static_cast<std::int64_t>(a[i]) * b[i];
+    }
+    return sum;
+}
+```
+* `extern "C"`: Disables C++ name mangling so the function symbol matches the C-style linker export.
+* `__attribute__((noinline))`: Prevents GCC/Clang from inlining the function. If inlined, the compiler could see our deterministic test data and precompute the answer at compile time!
+
+#### 2. Strict Memory Alignment
+```cpp
+alignas(16) std::int32_t a[kCount];
+alignas(16) std::int32_t b[kCount];
+```
+* Forces array memory addresses to be 16-byte aligned. This ensures every 128-bit load in `neon_dot.s` is clean and never crosses a cache-line boundary.
+
+#### 3. Preventing Dead-Code Elimination
+```cpp
+volatile std::int64_t benchmark_sink = 0;
+...
+DotFn volatile call_target = dot;
+...
+benchmark_sink ^= result;
+```
+* **The Danger:** Modern compilers see that `result` isn't printed inside the timing loop and will delete the entire 20-run loop (**dead-code elimination**), resulting in a fake "0.0 ns" benchmark!
+* **The Fix:** Storing the function pointer in a `volatile` variable (`call_target`) forces the CPU to execute an indirect call every time. XORing into `volatile benchmark_sink` forces the result to be preserved in RAM.
+
+#### 4. Verification Check Before Timing
+```cpp
+const std::int64_t cpp_result = cpp_dot_product(a, b, kCount);
+const std::int64_t neon_result = neon_dot_product(a, b, kCount);
+if (cpp_result != neon_result) {
+    std::cerr << "ERROR: result mismatch...\n";
+    return EXIT_FAILURE;
+}
+```
+* Before taking a single nanosecond timing measurement, the program verifies that the hand-written assembly produces the exact same 64-bit integer as the C++ loop.
+
+---
+
+# Module 6: Cross-Toolchain, QEMU Emulation & GDB Remote Scripting (`Makefile` & `gdb_neon.gdb`)
+
+> **Goal:** Understand how to cross-compile for ARM64 on x86 Linux and debug vector registers in QEMU.
+
+### The Toolchain Pipeline
+
+```
+  [dot_benchmark.cpp] ──► aarch64-linux-gnu-g++ -O3 ──┐
+                                                       ├──► [build/neon_dot_benchmark] (ELF 64-bit AArch64)
+  [neon_dot.s]        ──► aarch64-linux-gnu-g++ -c  ──┘                │
+                                                                       ▼
+                                                          qemu-aarch64 -L /usr/aarch64-linux-gnu
+                                                                       │ (Remote GDB Stub :1234)
+                                                                       ▼
+                                                          gdb -x gdb_neon.gdb
+```
+
+### Key Makefile Targets Explained
+
+* `CXX := aarch64-linux-gnu-g++`: The cross-compiler prefix targeting 64-bit ARM Linux.
+* `SYSROOT := /usr/aarch64-linux-gnu`: Points QEMU to the root filesystem containing AArch64 shared libraries (`libc.so.6`).
+* `make run`: Invokes `qemu-aarch64 -L $(SYSROOT) $(TARGET)` to run the foreign ARM64 binary on x86 Linux.
+* `make disasm`: Runs `aarch64-linux-gnu-objdump -d -C -S` to generate a source-interleaved disassembly file `dot_benchmark.dis`.
+
+### GDB Remote Scripting Breakdown (`gdb_neon.gdb`)
+```gdb
+set architecture aarch64
+target remote :1234
+break neon_dot_product
+continue
+info registers x0 x1 x2 x3 x4 x5
+tbreak *(neon_dot_product + 144)
+continue
+info registers v0 v1 v2 v3 v4 v5 v6 v7 v16 v17 v18 v19
+x/12i $pc
+```
+* `target remote :1234`: Connects GDB to QEMU's live debugging server.
+* `tbreak *(neon_dot_product + 144)`: Sets a temporary breakpoint exactly 144 bytes into the assembly routine (the end of the first 32-element unrolled loop).
+* `info registers v0...v19`: Prints the 128-bit vector register contents in real time, allowing you to verify that `smlal`/`smlal2` correctly populated the lanes.
+
+---
+
+# Module 7: Microarchitecture Performance Analysis & The Memory Wall
+
+> **Goal:** Interpret real benchmark data and understand why hand-written SIMD won or lost on different hardware.
+
+### Native Hardware Results Analysis (From `README.md`)
+
+| Platform | CPU | C++ -O3 | NEON Asm | Speedup | Architectural Analysis |
+| :--- | :--- | :---: | :---: | :---: | :--- |
+| **macOS 26** | **Apple M4** | 176.5 µs | **97.6 µs** | **1.81x** | Apple M4 has wide 4-wide NEON execution ports. The 8 unrolled accumulators saturated the M4 pipeline, whereas Clang's auto-vectorizer generated fewer accumulators with dependency stalls. |
+| **macOS 26** | **Apple M1 Pro** | 109.3 µs | **108.8 µs** | **1.00x** | On M1 Pro, the execution hits the **DRAM Memory Bandwidth Wall**. Both implementations were waiting for cache lines from RAM, so compute optimization yielded identical wall-clock time. |
+| **Linux (QEMU)** | **Intel Core i7-12700H** | 851.6 µs | **557.8 µs** | **1.53x** | In QEMU, the assembly runs fewer emulated instructions because of manual loop unrolling, giving a synthetic 1.5x boost. |
+
+### The Memory Wall vs. Compute Bound
+1. **Total Dataset Footprint:**
+   $$\text{Memory} = 2 \times 1,000,003 \times 4 \text{ bytes} \approx 8.0 \text{ MB}$$
+2. **Cache Hierarchy Impact:**
+   * **L1 Cache (typically 64KB–128KB):** The arrays exceed L1 by **64x**.
+   * **L2 Cache (typically 4MB–8MB):** The arrays barely fit into L2 or must stream directly from System Level Cache (SLC) or DRAM.
+3. **Hardware Prefetchers:**
+   * Hand-written assembly uses sequential post-indexed loads (`[x0], #32`), which are a dream for CPU hardware stream prefetchers. The prefetcher recognizes the linear stride and loads subsequent cache lines before the instructions stall.
+
+---
+
+# Module 8: The MAANG Systems Interview Defense & Technical FAQ
+
+When interviewing for Systems, Kernel, Low-Level Infrastructure, or Performance Engineering roles at MAANG (Apple Silicon OS team, Meta Infrastructure, Google Systems/Chrome, Amazon AWS Graviton) or Tier-1 Quantitative Trading Firms (Citadel, Jane Street, Jump Trading), interviewers do not ask you to recite syntax mnemonics.
+
+They probe your design trade-offs to determine whether you copied an online snippet or genuinely understand the silicon, cache hierarchy, and execution pipeline.
+
+---
+
+### Part 1: The 60-Second Elevator Pitch
+When the interviewer asks:  
+> *"Tell me about this SIMD / AArch64 project on your resume."*
+
+**Your Verbal Delivery:**
+> *"I built a hand-written AArch64 NEON SIMD dot product engine to benchmark against GCC and Clang's `-O3` auto-vectorization on signed 32-bit integer arrays.*
+> 
+> *The core technical challenge was preventing 32-bit arithmetic overflow during large accumulations by widening into 64-bit accumulators. Rather than relying on compiler intrinsics, I wrote pure AArch64 assembly to directly control register allocation and pipeline scheduling. I unrolled the main loop to process 16 elements per iteration using 8 independent two-lane 64-bit accumulators (`v0`–`v3`, `v16`–`v19`), breaking Read-After-Write dependency chains and saturating multiple superscalar vector execution pipelines.*
+> 
+> *I designed a 4-tier execution pipeline: a 16-element unrolled vector loop, a 4-element SIMD cleanup loop, a pairwise horizontal reduction to bridge vector registers to general-purpose integer registers, and a scalar tail using hardware `smaddl` for remaining elements.*
+> 
+> *By strictly utilizing caller-saved scratch registers, the routine executes with zero stack frame allocation and zero stack spills. On Apple Silicon M4, this hand-written assembly achieved up to a **1.81x speedup** over the compiler baseline. I also built the cross-compilation pipeline using GNU toolchains and automated vector register inspection via QEMU and GDB remote scripting."*
+
+---
+
+### Part 2: The MAANG Technical Grilling (6 Core Architectural Questions)
+
+---
+
+#### Question 1: *"Why did you write this in raw assembly instead of just letting GCC or Clang auto-vectorize with `-O3 -march=native`?"*
+
+* **The Amateur Candidate Response:**  
+  *"Assembly is faster and closer to the metal than C++."* (Immediate red flag — modern optimizing compilers often outperform hand-written code).
+* **The MAANG-Grade Technical Defense:**  
+  *"Modern compilers are extraordinarily good at auto-vectorizing simple loops, but they operate under strict constraints: conservative aliasing assumptions, generic unrolling heuristics, and standard register allocation passes.
+  
+  When inspecting the assembly generated by Clang `-O3`, the compiler:
+  1. Utilized fewer independent accumulators (typically 2 to 4), leaving vector execution ports underutilized during multiply-accumulate latency windows.
+  2. Inserted additional vector-packing and unpack instructions because it struggled to match the non-trivial widening pattern cleanly.
+  
+  By writing hand-tuned AArch64 assembly, I took deterministic control over three critical aspects:
+  * **Explicit Instruction Selection:** I paired `smlal` and `smlal2` to widen 32-bit inputs into 64-bit accumulators in-place with zero vector-shuffle or unpacking overhead.
+  * **Targeted Pipeline Saturation:** I scheduled exactly 8 independent accumulators to match the 3–4 cycle latency of ARM vector ALUs.
+  * **Zero Stack Frame Overhead:** I restricted all operations to caller-saved registers (`v0..v19`, `x0..x5`), eliminating stack frame setup (`sub sp, sp, #imm`) and memory writes entirely."*
+
+---
+
+#### Question 2: *"Why did you use 8 accumulators? Why not 2? Why not 32?"*
+
+* **The Technical Defense:**  
+  *"It directly reflects the microarchitectural balance between **instruction latency, execution throughput, and register file pressure**.
+  
+  1. **The Latency Problem (Why not 1 or 2?):**  
+     On modern high-performance ARM cores (such as Apple Firestorm/Avalanche or ARM Cortex-X), the vector multiply-accumulate instruction (`smlal`) has an execution latency of **3 to 4 clock cycles**, but the processor features **2 parallel vector execution units**.  
+     If you use only 1 or 2 accumulators, each instruction has a Read-After-Write (RAW) data dependency on the preceding instruction. The processor's out-of-order execution engine stalls, inserting bubbles while waiting for the previous accumulator result to retire.
+  
+  2. **The Throughput Sweet Spot (Why 8?):**  
+     With 8 independent accumulators, the CPU can issue widening multiply-accumulates across independent execution units without waiting. By the time the execution loop cycles back to the first accumulator (`v0`), its previous result has already completed execution and written back. This guarantees $100\%$ pipeline utilization with zero dependency stalls.
+  
+  3. **The Register Pressure Problem (Why not 32?):**  
+     The AArch64 NEON ISA provides exactly 32 architectural vector registers (`v0` through `v31`). If you allocate 16 or 24 accumulators, you leave no registers for loading input operands (`q4..q7`, `q16..q19`). The compiler/assembler would be forced to **spill registers to the stack (DRAM/L1 cache)**, introducing memory load/store latency that completely destroys the SIMD speedup."*
+
+---
+
+#### Question 3: *"In `neon_dot.s`, what does `smlal2 v0.2d, v4.4s, v6.4s` do, and why is the input `.4s` while the output is `.2d`?"*
+
+* **The Technical Defense:**  
+  *"That instruction represents **Signed Multiply-Accumulate Long (Top / Second Part)**.
+  
+  * **The Overflow Problem:** When multiplying two 32-bit signed integers ($[-2^{31}, 2^{31}-1]$), the product can reach $2^{62}$, which immediately overflows a 32-bit integer. For arrays of a million elements, accumulating in 32-bit registers is impossible. We must accumulate into 64-bit lanes (`.2d`).
+  * **The ISA Vector Geometry:** A 128-bit vector register holds either **four 32-bit integers (`.4s`)** or **two 64-bit integers (`.2d`)**. Therefore, one 128-bit vector load contains 4 input integers, but a 128-bit accumulator can only hold 2 output sums.
+  * **The `smlal` / `smlal2` Hardware Pair:**
+    * `smlal v0.2d, v4.2s, v6.2s`: Inspects the **lower 64 bits** of `v4` and `v6` (lanes 0 and 1), multiplies the two 32-bit integers into 64-bit products, and adds them to `v0.2d`.
+    * `smlal2 v0.2d, v4.4s, v6.4s`: Tells the CPU decoding logic to inspect the **upper 64 bits** of `v4` and `v6` (lanes 2 and 3), multiplies those two 32-bit integers into 64-bit products, and accumulates them into the same `v0.2d`.
+  
+  In exactly two instructions, all 4 elements of the loaded vector are multiplied, widened, and accumulated without needing an explicit unpack or vector shuffle step."*
+
+---
+
+#### Question 4: *"In your benchmark, Apple M4 showed a 1.81x speedup over C++, but Apple M1 Pro showed identical performance (1.00x). Did your assembly routine fail on M1 Pro?"*
+
+* **The Technical Defense:**  
+  *"No. That benchmark outcome is a textbook demonstration of the **Memory Wall (Compute-Bound vs. Memory-Bandwidth-Bound workloads)**.
+  
+  * **Dataset Footprint:** The benchmark operates on two arrays of $N = 2,000,000$ 32-bit integers:
+    $$\text{Total Memory} = 2 \times 2,000,000 \times 4\text{ bytes} = 16\text{ MB}$$
+  * **Why M1 Pro was 1.00x:** On the Apple M1 Pro, 16 MB exceeds the per-core L2 cache capacity. The execution is bottlenecked by the **DRAM / System-Level Cache memory bus bandwidth**. Both the C++ auto-vectorized code and my hand-written assembly were stalling waiting for 64-byte cache lines to arrive from memory. When an algorithm is memory-bandwidth bound, optimizing the arithmetic ALU pipeline yields zero wall-clock speedup because the ALUs sit starved for data.
+  * **Why M4 achieved 1.81x:** The Apple M4 microarchitecture features larger cache allocations, higher IPC dispatch width, and substantially higher unified memory streaming bandwidth. Because the memory subsystem could feed data fast enough, the benchmark transitioned from memory-bound to compute-bound, allowing the 8-accumulator assembly pipeline to unlock its full $1.81\times$ computational throughput advantage."*
+
+---
+
+#### Question 5: *"Look at your assembly code. You didn't allocate a stack frame (`sub sp, sp, #N`) and you didn't execute `stp` or `ldp` to save registers. Did you just introduce a stack corruption bug?"*
+
+* **The Technical Defense:**  
+  *"No, the routine strictly complies with the **AAPCS64 (ARM 64-bit Architecture Procedure Call Standard)**.
+  
+  Under AAPCS64:
+  * General-purpose registers `x0` through `x7` are parameter/result and scratch registers — they are **caller-saved**.
+  * Vector registers `v0` through `v7` and `v16` through `v31` are **caller-saved**. (Only the lower 64 bits of `v8` through `v15` are designated as callee-saved).
+  
+  My assembly implementation was intentionally engineered to use:
+  * Pointer and control registers: `x0`, `x1`, `x2`, `x3`, `x4`, `x5` (all caller-saved).
+  * Accumulators: `v0`, `v1`, `v2`, `v3`, `v16`, `v17`, `v18`, `v19` (all caller-saved).
+  * Load buffers: `q4`, `q5`, `q6`, `q7` (all caller-saved).
+  
+  Because every single register touched belongs to the caller-saved ABI specification, the calling C++ code already expects them to be overwritten.
+  
+  By intentionally restricting register usage to this set, the function allocates **zero bytes on the stack**, saves zero registers to memory, and performs zero pointer adjustments on `sp`. It executes entirely inside the processor's silicon register file and returns immediately via `ret`."*
+
+---
+
+#### Question 6: *"Why didn't you write this using `arm_neon.h` intrinsics in C++ instead of raw `.s` assembly?"*
+
+* **The Technical Defense:**  
+  *"NEON intrinsics (`vmlal_s32`, `vld1q_s32`) offer portability within C++, but they delegate register allocation and scheduling back to the compiler's backend.
+  
+  In practice:
+  1. **Compiler Spill Decisions:** Under register pressure, compiler register allocators frequently decide to spill vector registers to the stack rather than maintaining all 8 accumulators live in silicon registers.
+  2. **Suboptimal Instruction Pairing:** Compilers often interleave vector loads and arithmetic in ways that disrupt hardware stream prefetchers or generate unnecessary register moves (`fmov` / `dup`).
+  3. **Stack Frame Overhead:** A C++ function containing intrinsics almost always sets up a stack frame (`stp x29, x30, [sp, -16]!`), which adds memory store and load instructions to the function prologue and epilogue.
+  
+  Writing hand-crafted assembly gave me 100% deterministic control over register residency, loop unrolling strides, zero stack frame allocation, and exact instruction sequencing."*
