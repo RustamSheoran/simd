@@ -134,3 +134,11 @@ QEMU user-mode runs serve as cross-platform correctness checks.
 
 See [BENCHMARK.md](BENCHMARK.md) for installation, build, execution, debugger,
 and result-submission instructions.
+
+## Resume headline and snippets
+
+**simd** | AArch64 assembly, ARM NEON SIMD, C++20, QEMU, GDB, GNU cross-toolchain
+
+* Hand-wrote an AArch64 NEON signed 32-bit dot product in raw assembly (no intrinsics): 32-element unrolled loop with eight independent 64-bit accumulators (`smlal`/`smlal2` widening multiply-accumulate), a 4-element cleanup loop and a scalar tail, with no stack frame or spills.
+* Benchmarked against -O3 C++ on 1,000,003-element arrays, with results verified equal before timing: 1.46–1.81× faster on Apple M4 (median 1.70×) and parity on M1 Pro.
+* Cross-compiled with the AArch64 GNU toolchain and verified under QEMU user mode with scripted remote GDB inspection of the vector registers; documented build steps for macOS, Linux, WSL2 and Android.
