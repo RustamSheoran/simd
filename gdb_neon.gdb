@@ -10,7 +10,7 @@ printf "\nAt entry (x0=a, x1=b, x2=count):\n"
 info registers x0 x1 x2 x3 x4 x5
 
 # Stop after the first unrolled 32-element block and its count decrement.
-tbreak *(neon_dot_product + 144)
+tbreak *(neon_dot_product + 140)
 continue
 printf "\nAfter the first 32-element vector iteration:\n"
 info registers x0 x1 x2 x3 x4 x5

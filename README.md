@@ -15,8 +15,8 @@ experiment, not a replacement for portable production code.
 
 The AArch64 ELF assembly implementation exports
 `int64_t neon_dot_product(const int32_t *, const int32_t *, size_t)`. It takes
-the two array pointers and element count in `x0`–`x2`, loads 16 bytes from each
-array into `q1` and `q2`, and returns the signed 64-bit sum in `x0`. The routine
+the two array pointers and element count in `x0`–`x2`, loads 32 bytes per array
+per block into `q4`–`q7`, and returns the signed 64-bit sum in `x0`. The routine
 uses only caller-saved general-purpose and SIMD registers, so no stack frame or
 callee-saved-register spill is required.
 
@@ -63,9 +63,6 @@ performance data.
 
 | Platform                 | CPU          | C++ -O3 ns/dot | NEON asm ns/dot | Speedup |
 | ------------------------ | ------------ | -------------: | --------------: | ------: |
-| macOS 26 (Apple Silicon) | Apple M1 Pro |         6696.1 |        379029.4 |  0.018x |
-| macOS 26 (Apple Silicon) | Apple M1 Pro |       111734.3 |        338653.7 |  0.330x |
-| macOS 26 (Apple Silicon) | Apple M1 Pro |       105768.1 |        134546.5 |  0.786x |
 | macOS 26 (Apple Silicon) | Apple M1 Pro |       109388.7 |        108834.5 |  1.005x |
 | macOS 26 (Apple Silicon) | Apple M1 Pro |       131919.2 |        125140.5 |  1.054x |
 | macOS 26 (Apple Silicon) | Apple M4     |       177147.9 |        100677.6 |  1.760x |
@@ -74,11 +71,15 @@ performance data.
 | macOS 26 (Apple Silicon) | Apple M4     |       130941.2 |         89766.7 |  1.459x |
 | macOS 26 (Apple Silicon) | Apple M4     |       165887.7 |         97405.1 |  1.703x |
 
-### Arch Linux host runs through QEMU user mode
+<details>
+<summary>QEMU user-mode verification (correctness only, not performance data)</summary>
 
 These runs were recorded on the listed host CPU while `qemu-aarch64` executed
 the AArch64 binary. They preserve the observed relative QEMU performance, but
-are not native AArch64 hardware measurements.
+are not native AArch64 hardware measurements. Per [BENCHMARK.md](BENCHMARK.md),
+QEMU user-mode runs serve as cross-platform correctness checks.
+
+### Arch Linux host runs through QEMU user mode
 
 | Platform                           | CPU                              | C++ -O3 ns/dot | NEON asm ns/dot | Speedup |
 | ---------------------------------- | -------------------------------- | -------------: | --------------: | ------: |
@@ -102,10 +103,6 @@ are not native AArch64 hardware measurements.
 
 ### Fedora Linux host runs through QEMU user mode
 
-These runs were recorded on the listed host CPU while `qemu-aarch64` executed
-the AArch64 binary. They preserve the observed relative QEMU performance, but
-are not native AArch64 hardware measurements.
-
 | Platform                                | CPU                              | C++ -O3 ns/dot | NEON asm ns/dot | Speedup |
 | --------------------------------------- | -------------------------------- | -------------: | --------------: | ------: |
 | Fedora Linux x86_64 (QEMU user mode)    | Intel Core i7-12700H @ 2.30 GHz  |       875841.0 |        562462.6 |  1.557x |
@@ -118,10 +115,6 @@ are not native AArch64 hardware measurements.
 | Fedora Linux x86_64 (QEMU user mode)    | Intel Core i7-12700H @ 2.30 GHz  |       853594.1 |        552231.1 |  1.546x |
 
 ### Windows 11 / WSL2 host runs through QEMU user mode
-
-These runs were recorded on Windows 11 using WSL2, with `qemu-aarch64`
-executing the AArch64 Linux binary. They preserve the observed relative QEMU
-performance, but are not native AArch64 hardware measurements.
 
 | Platform                           | CPU                            | C++ -O3 ns/dot | NEON asm ns/dot | Speedup |
 | ---------------------------------- | -------------------------------| -------------: | --------------: | ------: |
@@ -137,6 +130,7 @@ performance, but are not native AArch64 hardware measurements.
 | Windows 11 / WSL2 (QEMU user mode) | Intel Core i3-1215U @ 1.20 GHz |       951752.2 |        612223.7 |  1.555x |
 | Windows 11 / WSL2 (QEMU user mode) | Intel Core i3-1215U @ 1.20 GHz |       966856.6 |        595240.0 |  1.624x |
 | Windows 11 / WSL2 (QEMU user mode) | Intel Core i3-1215U @ 1.20 GHz |       999398.6 |        594836.0 |  1.680x |
+</details>
 
 See [BENCHMARK.md](BENCHMARK.md) for installation, build, execution, debugger,
 and result-submission instructions.

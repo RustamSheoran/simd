@@ -15,7 +15,7 @@
 6. [Module 5: The C++20 Benchmark Harness & Robust Measurement (`dot_benchmark.cpp`)](#module-5-the-c20-benchmark-harness--robust-measurement-dot_benchmarkcpp)
 7. [Module 6: Cross-Toolchain, QEMU Emulation & GDB Remote Scripting (`Makefile` & `gdb_neon.gdb`)](#module-6-cross-toolchain-qemu-emulation--gdb-remote-scripting-makefile--gdb_neongdb)
 8. [Module 7: Microarchitecture Performance Analysis & The Memory Wall](#module-7-microarchitecture-performance-analysis--the-memory-wall)
-9. [Module 8: The MAANG Systems Interview Defense & Technical FAQ](#module-8-the-maang-systems-interview-defense--technical-faq)
+9. [Module 8: Architecture FAQ & Technical Deep-Dive](#module-8-architecture-faq--technical-deep-dive)
 
 ---
 
@@ -587,7 +587,7 @@ info registers v0 v1 v2 v3 v4 v5 v6 v7 v16 v17 v18 v19
 x/12i $pc
 ```
 * `target remote :1234`: Connects GDB to QEMU's live debugging server.
-* `tbreak *(neon_dot_product + 144)`: Sets a temporary breakpoint exactly 144 bytes into the assembly routine (the end of the first 32-element unrolled loop).
+* `tbreak *(neon_dot_product + 140)`: Sets a temporary breakpoint exactly 140 bytes into the assembly routine (the branch back after the first 32-element unrolled loop iteration).
 * `info registers v0...v19`: Prints the 128-bit vector register contents in real time, allowing you to verify that `smlal`/`smlal2` correctly populated the lanes.
 
 ---
@@ -600,8 +600,8 @@ x/12i $pc
 
 | Platform | CPU | C++ -O3 | NEON Asm | Speedup | Architectural Analysis |
 | :--- | :--- | :---: | :---: | :---: | :--- |
-| **macOS 26** | **Apple M4** | 176.5 µs | **97.6 µs** | **1.81x** | Apple M4 has wide 4-wide NEON execution ports. The 8 unrolled accumulators saturated the M4 pipeline, whereas Clang's auto-vectorizer generated fewer accumulators with dependency stalls. |
-| **macOS 26** | **Apple M1 Pro** | 109.3 µs | **108.8 µs** | **1.00x** | On M1 Pro, the execution hits the **DRAM Memory Bandwidth Wall**. Both implementations were waiting for cache lines from RAM, so compute optimization yielded identical wall-clock time. |
+| **macOS 26** | **Apple M4** | 176.5 µs | **97.6 µs** | **1.81x** | Apple M4 features wide NEON execution pipelines. A possible explanation for the speedup is that 8 manual accumulators hid instruction latency across parallel execution units better than compiler auto-vectorization heuristics. |
+| **macOS 26** | **Apple M1 Pro** | 109.3 µs | **108.8 µs** | **1.00x** | On M1 Pro, both implementations show parity. A possible explanation is that the execution was constrained by memory subsystem/cache bandwidth rather than raw arithmetic throughput. |
 | **Linux (QEMU)** | **Intel Core i7-12700H** | 851.6 µs | **557.8 µs** | **1.53x** | In QEMU, the assembly runs fewer emulated instructions because of manual loop unrolling, giving a synthetic 1.5x boost. |
 
 ### The Memory Wall vs. Compute Bound
@@ -609,129 +609,109 @@ x/12i $pc
    $$\text{Memory} = 2 \times 1,000,003 \times 4 \text{ bytes} \approx 8.0 \text{ MB}$$
 2. **Cache Hierarchy Impact:**
    * **L1 Cache (typically 64KB–128KB):** The arrays exceed L1 by **64x**.
-   * **L2 Cache (typically 4MB–8MB):** The arrays barely fit into L2 or must stream directly from System Level Cache (SLC) or DRAM.
+   * **L2 / System-Level Cache:** On chips like the M1 Pro (12 MB L2 per P-cluster) or M4 (16 MB L2), an 8 MB dataset approaches or sits within the cache boundary, where streaming prefetchers and bus bandwidth play a major role.
 3. **Hardware Prefetchers:**
-   * Hand-written assembly uses sequential post-indexed loads (`[x0], #32`), which are a dream for CPU hardware stream prefetchers. The prefetcher recognizes the linear stride and loads subsequent cache lines before the instructions stall.
+   * Hand-written assembly uses sequential post-indexed loads (`[x0], #32`), which are ideal for CPU hardware stream prefetchers. The prefetcher recognizes the linear stride and loads subsequent cache lines before instructions stall.
 
 ---
 
-# Module 8: The MAANG Systems Interview Defense & Technical FAQ
+# Module 8: Architecture FAQ & Technical Deep-Dive
 
-When interviewing for Systems, Kernel, Low-Level Infrastructure, or Performance Engineering roles at MAANG (Apple Silicon OS team, Meta Infrastructure, Google Systems/Chrome, Amazon AWS Graviton) or Tier-1 Quantitative Trading Firms (Citadel, Jane Street, Jump Trading), interviewers do not ask you to recite syntax mnemonics.
-
-They probe your design trade-offs to determine whether you copied an online snippet or genuinely understand the silicon, cache hierarchy, and execution pipeline.
+This module breaks down the core microarchitectural design decisions, hardware trade-offs, and execution characteristics of the hand-written AArch64 NEON implementation.
 
 ---
 
-### Part 1: The 60-Second Elevator Pitch
-When the interviewer asks:  
-> *"Tell me about this SIMD / AArch64 project on your resume."*
-
-**Your Verbal Delivery:**
-> *"I built a hand-written AArch64 NEON SIMD dot product engine to benchmark against GCC and Clang's `-O3` auto-vectorization on signed 32-bit integer arrays.*
-> 
-> *The core technical challenge was preventing 32-bit arithmetic overflow during large accumulations by widening into 64-bit accumulators. Rather than relying on compiler intrinsics, I wrote pure AArch64 assembly to directly control register allocation and pipeline scheduling. I unrolled the main loop to process 16 elements per iteration using 8 independent two-lane 64-bit accumulators (`v0`–`v3`, `v16`–`v19`), breaking Read-After-Write dependency chains and saturating multiple superscalar vector execution pipelines.*
-> 
-> *I designed a 4-tier execution pipeline: a 16-element unrolled vector loop, a 4-element SIMD cleanup loop, a pairwise horizontal reduction to bridge vector registers to general-purpose integer registers, and a scalar tail using hardware `smaddl` for remaining elements.*
-> 
-> *By strictly utilizing caller-saved scratch registers, the routine executes with zero stack frame allocation and zero stack spills. On Apple Silicon M4, this hand-written assembly achieved up to a **1.81x speedup** over the compiler baseline. I also built the cross-compilation pipeline using GNU toolchains and automated vector register inspection via QEMU and GDB remote scripting."*
+### Technical Summary
+* **Algorithm & ISA:** AArch64 NEON signed 32-bit dot product accumulating into signed 64-bit scalar result.
+* **Widening Arithmetic:** Paired `smlal` (low halves) and `smlal2` (high halves) prevent 32-bit arithmetic overflow during large accumulations, widening directly into 64-bit lanes without unpacking overhead.
+* **Unrolling & Accumulators:** The main loop unrolls to process **32 elements per iteration** across **8 independent two-lane 64-bit accumulators** (`v0`–`v3`, `v16`–`v19`), hiding instruction latency across superscalar vector pipelines.
+* **Four-Tier Execution Pipeline:**
+  1. 32-element unrolled vector loop (`.Lvector32`)
+  2. 4-element SIMD cleanup loop (`.Lvector4`)
+  3. Horizontal pairwise accumulator reduction (`.Ltail`)
+  4. Scalar tail loop using hardware `smaddl` for remaining elements (`.Ltail_loop`)
+* **Zero Stack Overhead:** Exclusively utilizes caller-saved registers (`x0`–`x5`, `v0`–`v7`, `v16`–`v19`), requiring zero stack frame allocation, zero memory spills, and zero register save/restore instructions.
 
 ---
 
-### Part 2: The MAANG Technical Grilling (6 Core Architectural Questions)
+### Core Architectural Questions
 
 ---
 
-#### Question 1: *"Why did you write this in raw assembly instead of just letting GCC or Clang auto-vectorize with `-O3 -march=native`?"*
+#### Question 1: Why write this in raw assembly instead of relying on compiler auto-vectorization (`-O3`)?
 
-* **The Amateur Candidate Response:**  
-  *"Assembly is faster and closer to the metal than C++."* (Immediate red flag — modern optimizing compilers often outperform hand-written code).
-* **The MAANG-Grade Technical Defense:**  
-  *"Modern compilers are extraordinarily good at auto-vectorizing simple loops, but they operate under strict constraints: conservative aliasing assumptions, generic unrolling heuristics, and standard register allocation passes.
-  
-  When inspecting the assembly generated by Clang `-O3`, the compiler:
-  1. Utilized fewer independent accumulators (typically 2 to 4), leaving vector execution ports underutilized during multiply-accumulate latency windows.
-  2. Inserted additional vector-packing and unpack instructions because it struggled to match the non-trivial widening pattern cleanly.
-  
-  By writing hand-tuned AArch64 assembly, I took deterministic control over three critical aspects:
-  * **Explicit Instruction Selection:** I paired `smlal` and `smlal2` to widen 32-bit inputs into 64-bit accumulators in-place with zero vector-shuffle or unpacking overhead.
-  * **Targeted Pipeline Saturation:** I scheduled exactly 8 independent accumulators to match the 3–4 cycle latency of ARM vector ALUs.
-  * **Zero Stack Frame Overhead:** I restricted all operations to caller-saved registers (`v0..v19`, `x0..x5`), eliminating stack frame setup (`sub sp, sp, #imm`) and memory writes entirely."*
+Modern compilers are extraordinarily capable at vectorizing simple loops, but operate under generic cost models, conservative aliasing rules, and standard register allocation heuristics.
+
+Writing hand-tuned AArch64 assembly allows deterministic control over three critical aspects:
+1. **Explicit Instruction Selection:** Pairing `smlal` and `smlal2` widens 32-bit inputs into 64-bit accumulators in-place with zero vector-shuffle or unpacking overhead.
+2. **Targeted Pipeline Latency Hiding:** Scheduling exactly 8 independent accumulators matches the 3–4 cycle latency of ARM vector multiply-accumulate execution units, preventing dependency stalls that can occur when auto-vectorizers allocate fewer accumulators.
+3. **Zero Stack Frame Overhead:** Restricting all operations to caller-saved registers eliminates stack frame allocation (`sub sp, sp, #imm`), register spills, and function prologue/epilogue overhead entirely.
 
 ---
 
-#### Question 2: *"Why did you use 8 accumulators? Why not 2? Why not 32?"*
+#### Question 2: Why use 8 accumulators? Why not 2? Why not 32?
 
-* **The Technical Defense:**  
-  *"It directly reflects the microarchitectural balance between **instruction latency, execution throughput, and register file pressure**.
-  
-  1. **The Latency Problem (Why not 1 or 2?):**  
-     On modern high-performance ARM cores (such as Apple Firestorm/Avalanche or ARM Cortex-X), the vector multiply-accumulate instruction (`smlal`) has an execution latency of **3 to 4 clock cycles**, but the processor features **2 parallel vector execution units**.  
-     If you use only 1 or 2 accumulators, each instruction has a Read-After-Write (RAW) data dependency on the preceding instruction. The processor's out-of-order execution engine stalls, inserting bubbles while waiting for the previous accumulator result to retire.
-  
-  2. **The Throughput Sweet Spot (Why 8?):**  
-     With 8 independent accumulators, the CPU can issue widening multiply-accumulates across independent execution units without waiting. By the time the execution loop cycles back to the first accumulator (`v0`), its previous result has already completed execution and written back. This guarantees $100\%$ pipeline utilization with zero dependency stalls.
-  
-  3. **The Register Pressure Problem (Why not 32?):**  
-     The AArch64 NEON ISA provides exactly 32 architectural vector registers (`v0` through `v31`). If you allocate 16 or 24 accumulators, you leave no registers for loading input operands (`q4..q7`, `q16..q19`). The compiler/assembler would be forced to **spill registers to the stack (DRAM/L1 cache)**, introducing memory load/store latency that completely destroys the SIMD speedup."*
+This choice balances instruction latency, execution throughput, and register file pressure:
 
----
+1. **The Latency Problem (Why not 1 or 2?):**  
+   On modern high-performance ARM cores (e.g. Apple Firestorm/Avalanche or ARM Cortex-X), vector multiply-accumulate instructions (`smlal`) have an execution latency of **3 to 4 clock cycles**, while cores feature multiple parallel vector pipelines.  
+   With only 1 or 2 accumulators, each instruction has a Read-After-Write (RAW) data dependency on the preceding instruction, causing out-of-order execution engines to stall or insert bubbles waiting for accumulator results to retire.
 
-#### Question 3: *"In `neon_dot.s`, what does `smlal2 v0.2d, v4.4s, v6.4s` do, and why is the input `.4s` while the output is `.2d`?"*
+2. **The Throughput Sweet Spot (Why 8?):**  
+   With 8 independent accumulators, the processor can continuously issue widening multiply-accumulates across independent execution ports. By the time execution loops back to the first accumulator (`v0`), its previous result has already retired, significantly reducing RAW dependency stalls.
 
-* **The Technical Defense:**  
-  *"That instruction represents **Signed Multiply-Accumulate Long (Top / Second Part)**.
-  
-  * **The Overflow Problem:** When multiplying two 32-bit signed integers ($[-2^{31}, 2^{31}-1]$), the product can reach $2^{62}$, which immediately overflows a 32-bit integer. For arrays of a million elements, accumulating in 32-bit registers is impossible. We must accumulate into 64-bit lanes (`.2d`).
-  * **The ISA Vector Geometry:** A 128-bit vector register holds either **four 32-bit integers (`.4s`)** or **two 64-bit integers (`.2d`)**. Therefore, one 128-bit vector load contains 4 input integers, but a 128-bit accumulator can only hold 2 output sums.
-  * **The `smlal` / `smlal2` Hardware Pair:**
-    * `smlal v0.2d, v4.2s, v6.2s`: Inspects the **lower 64 bits** of `v4` and `v6` (lanes 0 and 1), multiplies the two 32-bit integers into 64-bit products, and adds them to `v0.2d`.
-    * `smlal2 v0.2d, v4.4s, v6.4s`: Tells the CPU decoding logic to inspect the **upper 64 bits** of `v4` and `v6` (lanes 2 and 3), multiplies those two 32-bit integers into 64-bit products, and accumulates them into the same `v0.2d`.
-  
-  In exactly two instructions, all 4 elements of the loaded vector are multiplied, widened, and accumulated without needing an explicit unpack or vector shuffle step."*
+3. **The Register Pressure Problem (Why not 32?):**  
+   AArch64 NEON provides 32 architectural vector registers (`v0`–`v31`). Dedicating 8 registers to accumulators leaves ample registers for load buffers (`q4`–`q7`). Using 16 or 24 accumulators would risk register spilling to memory, adding store/load latency that would negate SIMD gains.
 
 ---
 
-#### Question 4: *"In your benchmark, Apple M4 showed a 1.81x speedup over C++, but Apple M1 Pro showed identical performance (1.00x). Did your assembly routine fail on M1 Pro?"*
+#### Question 3: What does `smlal2 v0.2d, v4.4s, v6.4s` do, and why is the input `.4s` while the output is `.2d`?
 
-* **The Technical Defense:**  
-  *"No. That benchmark outcome is a textbook demonstration of the **Memory Wall (Compute-Bound vs. Memory-Bandwidth-Bound workloads)**.
-  
-  * **Dataset Footprint:** The benchmark operates on two arrays of $N = 2,000,000$ 32-bit integers:
-    $$\text{Total Memory} = 2 \times 2,000,000 \times 4\text{ bytes} = 16\text{ MB}$$
-  * **Why M1 Pro was 1.00x:** On the Apple M1 Pro, 16 MB exceeds the per-core L2 cache capacity. The execution is bottlenecked by the **DRAM / System-Level Cache memory bus bandwidth**. Both the C++ auto-vectorized code and my hand-written assembly were stalling waiting for 64-byte cache lines to arrive from memory. When an algorithm is memory-bandwidth bound, optimizing the arithmetic ALU pipeline yields zero wall-clock speedup because the ALUs sit starved for data.
-  * **Why M4 achieved 1.81x:** The Apple M4 microarchitecture features larger cache allocations, higher IPC dispatch width, and substantially higher unified memory streaming bandwidth. Because the memory subsystem could feed data fast enough, the benchmark transitioned from memory-bound to compute-bound, allowing the 8-accumulator assembly pipeline to unlock its full $1.81\times$ computational throughput advantage."*
+This instruction executes **Signed Multiply-Accumulate Long (Top / Second Part)**:
 
----
+* **The Overflow Problem:** Multiplying two 32-bit signed integers ($[-2^{31}, 2^{31}-1]$) produces a product up to $2^{62}$, which immediately overflows 32-bit integer storage. For large arrays, accumulation must take place in 64-bit lanes (`.2d`).
+* **Vector Geometry:** A 128-bit vector register holds either **four 32-bit integers (`.4s`)** or **two 64-bit integers (`.2d`)**. Each 128-bit vector load contains 4 input integers, but a 128-bit accumulator can only hold 2 output sums.
+* **The `smlal` / `smlal2` Hardware Pair:**
+  * `smlal v0.2d, v4.2s, v6.2s`: Multiplies the **lower 64 bits** of `v4` and `v6` (lanes 0 and 1) into 64-bit products and adds them to `v0.2d`.
+  * `smlal2 v0.2d, v4.4s, v6.4s`: Multiplies the **upper 64 bits** of `v4` and `v6` (lanes 2 and 3) into 64-bit products and accumulates them into `v0.2d`.
 
-#### Question 5: *"Look at your assembly code. You didn't allocate a stack frame (`sub sp, sp, #N`) and you didn't execute `stp` or `ldp` to save registers. Did you just introduce a stack corruption bug?"*
-
-* **The Technical Defense:**  
-  *"No, the routine strictly complies with the **AAPCS64 (ARM 64-bit Architecture Procedure Call Standard)**.
-  
-  Under AAPCS64:
-  * General-purpose registers `x0` through `x7` are parameter/result and scratch registers — they are **caller-saved**.
-  * Vector registers `v0` through `v7` and `v16` through `v31` are **caller-saved**. (Only the lower 64 bits of `v8` through `v15` are designated as callee-saved).
-  
-  My assembly implementation was intentionally engineered to use:
-  * Pointer and control registers: `x0`, `x1`, `x2`, `x3`, `x4`, `x5` (all caller-saved).
-  * Accumulators: `v0`, `v1`, `v2`, `v3`, `v16`, `v17`, `v18`, `v19` (all caller-saved).
-  * Load buffers: `q4`, `q5`, `q6`, `q7` (all caller-saved).
-  
-  Because every single register touched belongs to the caller-saved ABI specification, the calling C++ code already expects them to be overwritten.
-  
-  By intentionally restricting register usage to this set, the function allocates **zero bytes on the stack**, saves zero registers to memory, and performs zero pointer adjustments on `sp`. It executes entirely inside the processor's silicon register file and returns immediately via `ret`."*
+In exactly two instructions, all 4 elements of the loaded vector are multiplied, widened, and accumulated without explicit unpack or shuffle operations.
 
 ---
 
-#### Question 6: *"Why didn't you write this using `arm_neon.h` intrinsics in C++ instead of raw `.s` assembly?"*
+#### Question 4: In benchmarks, Apple M4 showed a 1.81x speedup over C++, while Apple M1 Pro showed parity (1.00x). What explains this difference?
 
-* **The Technical Defense:**  
-  *"NEON intrinsics (`vmlal_s32`, `vld1q_s32`) offer portability within C++, but they delegate register allocation and scheduling back to the compiler's backend.
-  
-  In practice:
-  1. **Compiler Spill Decisions:** Under register pressure, compiler register allocators frequently decide to spill vector registers to the stack rather than maintaining all 8 accumulators live in silicon registers.
-  2. **Suboptimal Instruction Pairing:** Compilers often interleave vector loads and arithmetic in ways that disrupt hardware stream prefetchers or generate unnecessary register moves (`fmov` / `dup`).
-  3. **Stack Frame Overhead:** A C++ function containing intrinsics almost always sets up a stack frame (`stp x29, x30, [sp, -16]!`), which adds memory store and load instructions to the function prologue and epilogue.
-  
-  Writing hand-crafted assembly gave me 100% deterministic control over register residency, loop unrolling strides, zero stack frame allocation, and exact instruction sequencing."*
+This difference illustrates the transition between **Compute-Bound** and **Memory-Bandwidth-Bound** workloads:
+
+* **Dataset Footprint:** The benchmark operates on two arrays of $N = 1,000,003$ 32-bit integers:
+  $$\text{Total Memory} = 2 \times 1,000,003 \times 4\text{ bytes} \approx 8.0\text{ MB}$$
+* **Why M1 Pro showed parity (~1.00x):** On M1 Pro, execution was constrained by memory subsystem throughput. When memory bandwidth or prefetching latency is the primary bottleneck, compute-level ALU optimizations produce identical wall-clock time because execution pipelines spend cycles waiting for cache lines to arrive.
+* **Why M4 achieved 1.81x:** The Apple M4 microarchitecture features substantially higher unified memory streaming bandwidth and wider instruction dispatch. Because the memory subsystem fed data fast enough to saturate compute pipelines, the benchmark became compute-bound, unlocking the throughput advantage of the 8-accumulator unrolled assembly loop over compiler-generated code.
+
+---
+
+#### Question 5: Why does the assembly code not allocate a stack frame or save registers?
+
+The routine strictly complies with the **AAPCS64 (ARM 64-bit Architecture Procedure Call Standard)**:
+
+Under AAPCS64:
+* General-purpose registers `x0` through `x7` are parameter/result and scratch registers (**caller-saved**).
+* Vector registers `v0` through `v7` and `v16` through `v31` are **caller-saved**. (Only the lower 64 bits of `v8` through `v15` are callee-saved).
+
+The assembly routine exclusively uses:
+* Pointer and control registers: `x0`, `x1`, `x2`, `x3`, `x4`, `x5` (caller-saved)
+* Accumulators: `v0`, `v1`, `v2`, `v3`, `v16`, `v17`, `v18`, `v19` (caller-saved)
+* Load buffers: `q4`, `q5`, `q6`, `q7` (caller-saved)
+
+Because all registers touched are caller-saved, the calling C++ code already assumes they will be overwritten. The routine allocates **zero bytes on the stack**, performs zero memory stores/loads for register saving, and executes entirely within the processor's silicon register file before returning with `ret`.
+
+---
+
+#### Question 6: Why pure assembly over C++ NEON intrinsics (`arm_neon.h`)?
+
+NEON intrinsics offer C++ portability, but delegate register allocation and scheduling back to compiler backends.
+
+Writing assembly directly ensures:
+1. **Deterministic Register Allocation:** Prevents compiler register allocators from spilling vector registers to memory when maintaining 8 live accumulators.
+2. **Instruction Scheduling Control:** Guarantees strict linear post-indexed load pairing (`[x0], #32`) that maximizes hardware stream prefetcher efficiency without compiler-inserted moves or unpacking operations.
+3. **Zero Stack Frame:** Intrinsics functions almost always incur stack frame setup (`stp x29, x30, [sp, -16]!`), adding prologue and epilogue memory traffic that pure assembly avoids.
