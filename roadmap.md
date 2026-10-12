@@ -1,6 +1,5 @@
 # Hand-Written AArch64 NEON Dot Product Engine: From Bare Bones to Silicon
 
-> **Target Project:** `/home/rustam/Projects/simd`  
 > **Architecture:** AArch64 (ARMv8-A / Apple Silicon / AWS Graviton / ARM Cortex-A)  
 > **Core Technologies:** Hand-written Assembly (`.s`), NEON SIMD, C++20, GNU Cross-Toolchain, QEMU User-Mode Emulation, Remote GDB Scripting.
 
@@ -185,7 +184,7 @@ Modern high-performance CPUs (like Apple M1/M4, Intel Core, AMD Zen, ARM Cortex-
 * **The Catch (Data Hazards):** If Instruction 2 needs the result of Instruction 1:
   ```assembly
   smlal v0.2d, v4.2s, v6.2s   // Instruction 1: writes to v0
-  smlal v0.2d, v5.2s, v7.2s   // Instruction 2: needs v0! MUST WAIT 3–4 CYCLES!
+  smlal v0.2d, v5.2s, v7.2s   // Instruction 2: needs v0! Can stall for the instruction's latency.
   ```
   Instruction 2 is stalled! It cannot execute until Instruction 1 finishes.
 * **The Solution (Independent Accumulators):**
@@ -477,7 +476,7 @@ What about the remaining elements? ($1,000,003 \pmod 4 = 3$ elements remaining):
 * `ldr w4, [x0], #4`: Loads a single 32-bit integer from `a` into general-purpose register `w4` and increments `x0` by 4.
 * `ldr w5, [x1], #4`: Loads a single 32-bit integer from `b` into `w5` and increments `x1` by 4.
 * `smaddl x3, w4, w5, x3`:
-  * **Signed Multiply-Add Long:** Computes $x_3 = (w_4 \times w_5) + x_3$ in **a single hardware cycle**!
+  * **Signed Multiply-Add Long:** Computes $x_3 = (w_4 \times w_5) + x_3$ in **a single instruction** without needing separate multiply and add steps.
 * `sub x2, x2, #1`: Decrements count by 1.
 * `b .Ltail_loop`: Loops until `x2 == 0`.
 
@@ -581,7 +580,7 @@ target remote :1234
 break neon_dot_product
 continue
 info registers x0 x1 x2 x3 x4 x5
-tbreak *(neon_dot_product + 144)
+tbreak *(neon_dot_product + 140)
 continue
 info registers v0 v1 v2 v3 v4 v5 v6 v7 v16 v17 v18 v19
 x/12i $pc
@@ -602,7 +601,6 @@ x/12i $pc
 | :--- | :--- | :---: | :---: | :---: | :--- |
 | **macOS 26** | **Apple M4** | 176.5 µs | **97.6 µs** | **1.81x** | Apple M4 features wide NEON execution pipelines. A possible explanation for the speedup is that 8 manual accumulators hid instruction latency across parallel execution units better than compiler auto-vectorization heuristics. |
 | **macOS 26** | **Apple M1 Pro** | 109.3 µs | **108.8 µs** | **1.00x** | On M1 Pro, both implementations show parity. A possible explanation is that the execution was constrained by memory subsystem/cache bandwidth rather than raw arithmetic throughput. |
-| **Linux (QEMU)** | **Intel Core i7-12700H** | 851.6 µs | **557.8 µs** | **1.53x** | In QEMU, the assembly runs fewer emulated instructions because of manual loop unrolling, giving a synthetic 1.5x boost. |
 
 ### The Memory Wall vs. Compute Bound
 1. **Total Dataset Footprint:**
@@ -679,14 +677,14 @@ In exactly two instructions, all 4 elements of the loaded vector are multiplied,
 
 ---
 
-#### Question 4: In benchmarks, Apple M4 showed a 1.81x speedup over C++, while Apple M1 Pro showed parity (1.00x). What explains this difference?
+#### Question 4: In benchmarks, Apple M4 showed a 1.5–1.8x speedup over C++, while Apple M1 Pro showed parity (1.005x, 1.054x). What explains this difference?
 
-This difference illustrates the transition between **Compute-Bound** and **Memory-Bandwidth-Bound** workloads:
+These performance differences point to hypotheses around compute versus memory bottlenecks (possible explanations, not measured with hardware performance counters):
 
 * **Dataset Footprint:** The benchmark operates on two arrays of $N = 1,000,003$ 32-bit integers:
   $$\text{Total Memory} = 2 \times 1,000,003 \times 4\text{ bytes} \approx 8.0\text{ MB}$$
-* **Why M1 Pro showed parity (~1.00x):** On M1 Pro, execution was constrained by memory subsystem throughput. When memory bandwidth or prefetching latency is the primary bottleneck, compute-level ALU optimizations produce identical wall-clock time because execution pipelines spend cycles waiting for cache lines to arrive.
-* **Why M4 achieved 1.81x:** The Apple M4 microarchitecture features substantially higher unified memory streaming bandwidth and wider instruction dispatch. Because the memory subsystem fed data fast enough to saturate compute pipelines, the benchmark became compute-bound, unlocking the throughput advantage of the 8-accumulator unrolled assembly loop over compiler-generated code.
+* **Why M1 Pro showed parity (~1.00x):** As noted in Module 7, 8.0 MB sits largely within the M1 Pro's performance-cluster L2 cache (12 MB), creating a tension with simple DRAM bottleneck explanations. Possible unmeasured explanations include cache-slice throughput limits, prefetcher contention under continuous streaming, or the compiler's loop matching the prefetcher stride equally well. If throughput is constrained by data delivery rather than arithmetic cycles, ALU optimizations yield parity because execution units are waiting for cache lines.
+* **Why M4 achieved 1.5–1.8x (median ~1.70x):** As a possible explanation (not measured), the Apple M4 microarchitecture features wider vector pipelines and higher cache/memory bandwidth. If data delivery was fast enough to keep execution compute-bound, the hand-scheduled 8-accumulator assembly loop could demonstrate its latency-hiding advantage over the compiler baseline.
 
 ---
 
@@ -711,7 +709,6 @@ Because all registers touched are caller-saved, the calling C++ code already ass
 
 NEON intrinsics offer C++ portability, but delegate register allocation and scheduling back to compiler backends.
 
-Writing assembly directly ensures:
-1. **Deterministic Register Allocation:** Prevents compiler register allocators from spilling vector registers to memory when maintaining 8 live accumulators.
-2. **Instruction Scheduling Control:** Guarantees strict linear post-indexed load pairing (`[x0], #32`) that maximizes hardware stream prefetcher efficiency without compiler-inserted moves or unpacking operations.
-3. **Zero Stack Frame:** Intrinsics functions almost always incur stack frame setup (`stp x29, x30, [sp, -16]!`), adding prologue and epilogue memory traffic that pure assembly avoids.
+Writing assembly directly provides:
+1. **Deterministic Register Allocation:** Avoids the possibility of the compiler register allocator choosing to spill vector registers to memory when maintaining 8 live accumulators.
+2. **Instruction Scheduling Control:** Uses clean linear post-indexed load pairs (`[x0], #32`) structured to cooperate with hardware stream prefetchers, avoiding compiler-inserted register moves or suboptimal instruction interleaving.
