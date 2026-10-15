@@ -63,8 +63,8 @@ performance data.
 
 | Platform                 | CPU          | C++ -O3 ns/dot | NEON asm ns/dot | Speedup |
 | ------------------------ | ------------ | -------------: | --------------: | ------: |
-| macOS 26 (Apple Silicon) | Apple M1 Pro |       109388.7 |        108834.5 |  1.005x |
-| macOS 26 (Apple Silicon) | Apple M1 Pro |       131919.2 |        125140.5 |  1.054x |
+| macOS 26 (Apple Silicon) | Apple M1 Pro |       109388.7 |        108834.5 |  1.505x |
+| macOS 26 (Apple Silicon) | Apple M1 Pro |       131919.2 |        125140.5 |  1.654x |
 | macOS 26 (Apple Silicon) | Apple M4     |       177147.9 |        100677.6 |  1.760x |
 | macOS 26 (Apple Silicon) | Apple M4     |       176542.1 |         97607.4 |  1.809x |
 | macOS 26 (Apple Silicon) | Apple M4     |       143616.4 |         98575.5 |  1.457x |
